@@ -18,3 +18,4 @@ apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils virt-viewer
 
 echo "Log off and log one again"
 
+vmbuilder kvm ubuntu vivid
