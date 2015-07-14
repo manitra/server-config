@@ -17,7 +17,5 @@ ufw enable
 apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils virt-viewer
 
 # Creates the first VM
-cd vm-01
-vmbuilder kvm ubuntu -c vm.cfg
-cd ..
+vmbuilder kvm ubuntu -c vm-01/vm.cfg
 
