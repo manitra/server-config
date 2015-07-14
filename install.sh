@@ -16,6 +16,8 @@ ufw enable
 # Install KVM (https://help.ubuntu.com/community/KVM/Installation#Installation_of_KVM)
 apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils virt-viewer
 
-echo "Log off and log one again"
+# Creates the first VM
+cd vm-01
+vmbuilder kvm ubuntu -c vm.cfg
+cd ..
 
-vmbuilder kvm ubuntu vivid
