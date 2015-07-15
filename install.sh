@@ -17,5 +17,16 @@ ufw enable
 apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils virt-viewer
 
 # Creates the first VM
-vmbuilder kvm ubuntu -c vm-01/vm.cfg
+vmbuilder kvm ubuntu \
+	--rootsize 16384 \
+	--mem 2024 --cpus 1 --arch amd64 \
+	--bridge br0 --ip 192.168.0.10 \
+	--domain manitra.net --hostname srv01 \
+	--user manitra --name Manitra --pass default \
+	--firstboot vm-boot.sh --firstlogin vm-login.sh \
+	--suite vivid --flavour virtual \
+	--addpkg acpid --addpkg openssh-server \
+	--mirror ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu --components main,universe,restricted \
+	--libvirt qemu:///system \
+	--destdir /var/vms/vm-01
 
