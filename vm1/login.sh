@@ -7,6 +7,6 @@ echo "starting by setting you keyboard and other console informations."
 #give the opportunity to change the keyboard
 sudo dpkg-reconfigure console-setup
 
-
-echo "Your appliance is now configured.  To use it point your"
-echo "browser to http://serverip/limesurvey/admin"
+# Installing EasyEngine is like PhpMyAdmin but for linux, https://github.com/rtCamp/easyengine
+wget -qO ee rt.cx/ee && sudo bash ee     # Install easyengine 3
+sudo ee site create example.com --wp     # Install required packages & setup WordPress on example.com

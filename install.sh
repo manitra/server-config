@@ -14,7 +14,7 @@ ufw allow 443
 ufw enable
 
 # Install KVM (https://help.ubuntu.com/community/KVM/Installation#Installation_of_KVM)
-apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils virt-viewer
+apt-get install qemu-kvm libvirt-bin ubuntu-vm-builder bridge-utils
 
 # Creates VM instances
 # http://www.naturalborncoder.com/virtualization/2014/10/27/installing-and-running-kvm-on-ubuntu-14-04-part-4/
@@ -28,17 +28,12 @@ vmbuilder kvm ubuntu \
 	--hostname vm01 \
 	--ip 192.168.122.101 \
 	--user manitra --name Manitra --pass default \
-	--firstboot `pwd`/vm-boot.sh --firstlogin `pwd`/vm-login.sh \
+	--firstboot `pwd`/vm1/boot.sh --firstlogin `pwd`/vm1/login.sh \
 	--suite trusty --flavour virtual \
 	--addpkg acpid --addpkg openssh-server --addpkg linux-image-generic \
 	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm01
-
-PUB_IP=$(ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{ print $1}')
-VLAN_RANGE="192.168.122.0/24"
-iptables -t nat -I PREROUTING -p tcp -d $PUB_IP --dport 80 -j DNAT --to-destination 192.168.122.101:80
-iptables -I FORWARD -m state -d $VLAN_RANGE --state NEW,RELATED,ESTABLISHED -j ACCEPT
 
 # vm02 => mono
 vmbuilder kvm ubuntu \
@@ -54,5 +49,9 @@ vmbuilder kvm ubuntu \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-02
 
-
+# Port forwarding
+PUB_IP=$(ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{ print $1}')
+VLAN_RANGE="192.168.122.0/24"
+iptables -t nat -I PREROUTING -p tcp -d $PUB_IP --dport 80 -j DNAT --to-destination 192.168.122.101:80
+iptables -I FORWARD -m state -d $VLAN_RANGE --state NEW,RELATED,ESTABLISHED -j ACCEPT
 
