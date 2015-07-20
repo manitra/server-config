@@ -29,14 +29,14 @@ vmbuilder kvm ubuntu \
 	--ip 192.168.122.101 --net 192.168.122.0 --mask 255.255.255.0 --gw 192.168.122.1 --bcast 192.168.122.255 --dns 192.168.122.1 \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
-	--addpkg acpid --addpkg openssh-server --addpkg linux-image-generic \
+	--addpkg acpid --addpkg linux-image-generic --addpkg vim \
 	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm01
 virsh start vm01
 echo "192.168.122.101 vm01" >> /etc/hosts
 
-# vm02 => mono
+# vm02 => Jenkins machine
 vmbuilder kvm ubuntu \
 	--cpus 1 --arch amd64 \
 	--rootsize 16384 \
@@ -45,12 +45,31 @@ vmbuilder kvm ubuntu \
 	--ip 192.168.122.102 --net 192.168.122.0 --mask 255.255.255.0 --gw 192.168.122.1 --bcast 192.168.122.255 --dns 192.168.122.1 \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
-	--addpkg acpid --addpkg openssh-server --addpkg linux-image-generic \
+	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim \
 	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-02
 virsh start vm02
 echo "192.168.122.102 vm02" >> /etc/hosts
+
+
+# vm03 => backup device
+vmbuilder kvm ubuntu \
+	--cpus 1 --arch amd64 \
+	--rootsize 1048576 \
+	--mem 1024 \
+	--hostname vm03 \
+	--ip 192.168.122.103 --net 192.168.122.0 --mask 255.255.255.0 --gw 192.168.122.1 --bcast 192.168.122.255 --dns 192.168.122.1 \
+	--user manitra --name Manitra --pass default \
+	--suite trusty --flavour virtual \
+	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim \
+	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
+	--libvirt qemu:///system \
+	--destdir /var/vms/vm-03
+virsh start vm03
+echo "192.168.122.103 vm03" >> /etc/hosts
+
+
 
 # Port forwarding 
 # - vm01 is the main web server
