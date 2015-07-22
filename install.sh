@@ -34,7 +34,8 @@ vmbuilder kvm ubuntu \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm01
 virsh start vm01
-echo "192.168.122.101 vm01" >> /etc/hosts
+virsh autostart vm01
+echo "192.168.122.101 wm01.web01.manitra.net vm01" >> /etc/hosts
 
 # vm02 => Jenkins machine
 vmbuilder kvm ubuntu \
@@ -50,7 +51,8 @@ vmbuilder kvm ubuntu \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-02
 virsh start vm02
-echo "192.168.122.102 vm02" >> /etc/hosts
+virsh autostart vm02
+echo "192.168.122.102 wm02.web01.manitra.net vm02" >> /etc/hosts
 
 
 # vm03 => backup device
@@ -67,15 +69,21 @@ vmbuilder kvm ubuntu \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-03
 virsh start vm03
-echo "192.168.122.103 vm03" >> /etc/hosts
+virsh autostart vm03
+echo "192.168.122.103 wm03.web01.manitra.net vm03" >> /etc/hosts
 
 
 
 # Port forwarding 
 # - vm01 is the main web server
-# - TODO
+# - vm03 is BitTorrent Sync administration on port 8888
+# then we save it to /etc/iptables.rules that we load on startup
 PUB_IP=$(ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{ print $1}')
 VLAN_RANGE="192.168.122.0/24"
 iptables -t nat    -I PREROUTING -p tcp -d $PUB_IP --dport 80 -j DNAT --to-destination 192.168.122.101:80
+iptables -t nat    -I PREROUTING -p tcp -d $PUB_IP --dport 8003 -j DNAT --to-destination 192.168.122.103:8888
 iptables -t filter -I FORWARD -m state -d $VLAN_RANGE --state NEW,RELATED,ESTABLISHED -j ACCEPT
+iptables-save > /etc/iptables.rules
+cp iptablesload /etc/network/if-pre-up.d/
+chmod +x /etc/network/if-pre-up.d/iptablesload
 
