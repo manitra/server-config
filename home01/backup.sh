@@ -3,7 +3,7 @@
 RC=1 
 while [[ RC -ne 0 ]]
 do
-	ls ~/backup/photos | parallel -v -j10 -I '$' --line-buffer rsync -avx '/home/manitra/backup/photos/$' 'manitra@web01.manitra.net:backup/photos'
+	find /home/manitra/backup/photos -mindepth 2 -maxdepth 2 | parallel -v -j10 --line-buffer rsync -avx '{}' 'manitra@web01.manitra.net:{//}'
 	RC=$?
 	sleep 5
 done
