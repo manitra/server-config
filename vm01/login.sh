@@ -13,4 +13,10 @@ sudo ee site create web01.manitra.net --wp     # Install required packages & set
 
 
 # installing mono fast cgi to be used with nginx
-sudo apt-get install mono-fastcgi-server4
+sudo apt-get install mono-complete
+
+# enabling 
+sudo mozroots --import --machine --sync
+sudo certmgr -ssl -m https://go.microsoft.com
+sudo certmgr -ssl -m https://nugetgallery.blob.core.windows.net
+sudo certmgr -ssl -m https://nuget.org
