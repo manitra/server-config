@@ -29,7 +29,7 @@ vmbuilder kvm ubuntu \
 	--ip 192.168.122.101 --net 192.168.122.0 --mask 255.255.255.0 --gw 192.168.122.1 --bcast 192.168.122.255 --dns 192.168.122.1 \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
-	--addpkg acpid --addpkg linux-image-generic --addpkg vim \
+	--addpkg acpid --addpkg linux-image-generic --addpkg vim --addpkg mono-complete \
 	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm01
@@ -46,7 +46,7 @@ vmbuilder kvm ubuntu \
 	--ip 192.168.122.102 --net 192.168.122.0 --mask 255.255.255.0 --gw 192.168.122.1 --bcast 192.168.122.255 --dns 192.168.122.1 \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
-	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim \
+	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim --addpkg git --addpkg mono-complete --addpkg npm \
 	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-02
@@ -81,6 +81,7 @@ echo "192.168.122.103 wm03.web01.manitra.net vm03" >> /etc/hosts
 PUB_IP=$(ifconfig eth0 | grep 'inet addr:' | cut -d: -f2 | awk '{ print $1}')
 VLAN_RANGE="192.168.122.0/24"
 iptables -t nat    -I PREROUTING -p tcp -d $PUB_IP --dport 80 -j DNAT --to-destination 192.168.122.101:80
+iptables -t nat    -I PREROUTING -p tcp -d $PUB_IP --dport 8002 -j DNAT --to-destination 192.168.122.102:8080
 iptables -t nat    -I PREROUTING -p tcp -d $PUB_IP --dport 8003 -j DNAT --to-destination 192.168.122.103:8888
 iptables -t filter -I FORWARD -m state -d $VLAN_RANGE --state NEW,RELATED,ESTABLISHED -j ACCEPT
 iptables-save > /etc/iptables.rules

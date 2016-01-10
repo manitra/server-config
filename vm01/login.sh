@@ -11,10 +11,6 @@ sudo dpkg-reconfigure console-setup
 wget -qO ee rt.cx/ee && sudo bash ee     # Install easyengine 3
 sudo ee site create web01.manitra.net --wp     # Install required packages & setup WordPress on example.com
 
-
-# installing mono fast cgi to be used with nginx
-sudo apt-get install mono-complete
-
 # enabling 
 sudo mozroots --import --machine --sync
 sudo certmgr -ssl -m https://go.microsoft.com
