@@ -30,12 +30,12 @@ vmbuilder kvm ubuntu \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
 	--addpkg acpid --addpkg linux-image-generic --addpkg vim --addpkg mono-complete \
-	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
+	--mirror "ftp://distrib-coffee.ipsl.jussieu.fr/pub/linux/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm01
 virsh start vm01
 virsh autostart vm01
-echo "192.168.122.101 wm01.web01.manitra.net vm01" >> /etc/hosts
+echo "192.168.122.101 vm01.web01.manitra.net vm01" >> /etc/hosts
 
 # vm02 => Jenkins machine
 vmbuilder kvm ubuntu \
@@ -47,13 +47,12 @@ vmbuilder kvm ubuntu \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
 	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim --addpkg git --addpkg mono-complete --addpkg npm \
-	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
+	--mirror "ftp://distrib-coffee.ipsl.jussieu.fr/pub/linux/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-02
 virsh start vm02
 virsh autostart vm02
-echo "192.168.122.102 wm02.web01.manitra.net vm02" >> /etc/hosts
-
+echo "192.168.122.102 vm02.web01.manitra.net vm02" >> /etc/hosts
 
 # vm03 => backup device
 vmbuilder kvm ubuntu \
@@ -65,14 +64,12 @@ vmbuilder kvm ubuntu \
 	--user manitra --name Manitra --pass default \
 	--suite trusty --flavour virtual \
 	--addpkg acpid --addpkg linux-image-generic --addpkg openssh-server --addpkg vim \
-	--mirror "ftp://ubuntu.mirrors.ovh.net/ftp.ubuntu.com/ubuntu" --components main,universe \
+	--mirror "ftp://distrib-coffee.ipsl.jussieu.fr/pub/linux/ubuntu" --components main,universe \
 	--libvirt qemu:///system \
 	--destdir /var/vms/vm-03
 virsh start vm03
 virsh autostart vm03
-echo "192.168.122.103 wm03.web01.manitra.net vm03" >> /etc/hosts
-
-
+echo "192.168.122.103 vm03.web01.manitra.net vm03" >> /etc/hosts
 
 # Port forwarding 
 # - vm01 is the main web server
