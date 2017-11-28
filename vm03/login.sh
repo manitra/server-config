@@ -1,10 +1,6 @@
 #! /bin/sh
 
+# VestaCP installation : https://vestacp.com/install/
 
-# install BitTorrent Sync (http://askubuntu.com/questions/284683/how-to-run-bittorrent-sync)
-mkdir bt
-cd bt
-wget https://download-cdn.getsync.com/stable/linux-x64/BitTorrent-Sync_x64.tar.gz
-tar xzpf BitTorrent-Sync_x64.tar.gz
-rm BitTorrent-Sync_x64.tar.gz
-./btsync --dump-sample-config > btsync.conf
+curl -O http://vestacp.com/pub/vst-install.sh
+bash vst-install.sh --nginx yes --apache yes --phpfpm no --named yes --remi no --vsftpd yes --proftpd no --iptables yes --fail2ban yes --quota no --exim yes --dovecot yes --spamassassin yes --clamav yes --mysql yes --postgresql no --hostname vm04.manitra.net --email default@mail.com --password default
