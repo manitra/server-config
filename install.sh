@@ -77,12 +77,11 @@ echo "192.168.122.103 vm03.web01.manitra.net vm03" >> /etc/hosts
 # - vm01 is the main web server
 # - vm03 is BitTorrent Sync administration on port 8888
 # then we save it to /etc/iptables.rules that we load on startup
-VLAN_RANGE="192.168.122.0/24"
 iptables -t nat    -I PREROUTING -p tcp -i eth0 --dport 80          -j DNAT --to-destination 192.168.122.101:80
 iptables -t nat    -I PREROUTING -p tcp -i eth0 --dport 21          -j DNAT --to-destination 192.168.122.103:21
 iptables -t nat    -I PREROUTING -p tcp -i eth0 --dport 443         -j DNAT --to-destination 192.168.122.103:443
 iptables -t nat    -I PREROUTING -p tcp -i eth0 --dport 12000:12100 -j DNAT --to-destination 192.168.122.103:12000-12100
-iptables -t filter -I FORWARD -m state -d $VLAN_RANGE --state NEW,RELATED,ESTABLISHED -j ACCEPT
+iptables -t filter -I FORWARD -m state -d 192.168.122.0/24 --state NEW,RELATED,ESTABLISHED -j ACCEPT
 iptables-save > /etc/iptables.rules
 cp iptablesload /etc/network/if-pre-up.d/
 chmod +x /etc/network/if-pre-up.d/iptablesload
