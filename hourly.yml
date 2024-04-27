@@ -1,0 +1,20 @@
+---
+- name: Manage DNS records on Cloudflare
+  hosts: localhost
+  gather_facts: no
+
+  pre_tasks:
+    - name: Load config file
+      include_vars: .config.yml
+
+  tasks:
+    - name: Define A DNS record for vps01
+      community.general.cloudflare_dns:
+        zone: "manitra.net"
+        type: "A"
+        record: "vps01"
+        value: "85.215.184.231"
+        ttl: 1
+        state: "present"
+        account_email: "{{ cloudflare_email }}"
+        account_api_key: "{{ cloudflare_api_key }}"
