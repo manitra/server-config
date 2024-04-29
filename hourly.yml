@@ -16,5 +16,5 @@
         value: "85.215.184.231"
         ttl: 1
         state: "present"
-        account_email: "{{ cloudflare_email }}"
-        account_api_key: "{{ cloudflare_api_key }}"
+        account_email: "{{ cloudflare.email }}"
+        account_api_key: "{{ cloudflare.api_key }}"
