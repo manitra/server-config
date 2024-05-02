@@ -1,3 +1,4 @@
 cloudflare:
+  enabled: true
   email: YOUR EMAIL
   api_key: YOUR API KEY

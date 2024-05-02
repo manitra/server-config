@@ -6,9 +6,11 @@
   community.general.cloudflare_dns:
     zone: "manitra.net"
     type: "A"
-    record: "vps01"
-    value: "85.215.184.231"
+    record: "{{ item.record }}"
+    value: "{{ item.value }}"
     ttl: 1
     state: "present"
     account_email: "{{ cloudflare.email }}"
     account_api_key: "{{ cloudflare.api_key }}"
+  loop: "{{ A }}"
+  when: cloudflare.enabled

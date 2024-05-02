@@ -1,0 +1,7 @@
+A:
+  - record: vps01
+    value: 85.215.184.231
+  - record: vps02
+    value: 85.215.184.232
+  - record: vps03
+    value: 85.215.184.233
