@@ -1,0 +1,7 @@
+
+- name: Update APT packages
+  apt:
+    upgrade: dist
+    update_cache: yes
+  tags : 
+    - update-package

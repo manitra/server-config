@@ -1,0 +1,22 @@
+
+- name: Allow SSH, HTTP and HTTPS only
+  ufw:
+    rule: allow 
+    port: "{{ item }}"
+    proto: tcp
+  with_items:
+     - '22'
+     - '80'
+     - '443'
+
+- name: Outgoing allow
+  ufw:
+    state: enabled
+    direction: outgoing
+    policy: allow
+
+- name: Incoming deny
+  ufw:
+    state: enabled
+    direction: incoming
+    policy: deny

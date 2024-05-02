@@ -1,0 +1,7 @@
+- name: Update user SSH keys
+  ansible.posix.authorized_key:
+    user: '{{ ansible_user }}'
+    key: '{{ lookup(''file'', item) }}'
+    state: present
+  with_fileglob:
+    - user-keys/*
