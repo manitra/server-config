@@ -2,3 +2,7 @@
 - hosts: localhost
   roles:
     - dns-config
+
+- hosts: all
+  roles:
+    - maintain
