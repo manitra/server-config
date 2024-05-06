@@ -1,4 +1,9 @@
+# Configuration for the DNS config role
 cloudflare:
   enabled: true
   email: YOUR EMAIL
   api_key: YOUR API KEY
+
+# Configuration for the hestia role
+hestia_admin_mail: YOUR EMAIL
+hestia_admin_pw: ADMIN PASSWORD

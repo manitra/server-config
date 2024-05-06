@@ -6,3 +6,7 @@
 - hosts: all
   roles:
     - maintain
+
+- hosts: hestia
+  roles:
+    - hestia

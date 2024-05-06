@@ -1,0 +1,34 @@
+# define the host name as the inventory name of the server
+server_hostname: "{{ inventory_hostname }}"
+
+# Install flags for hestiacp install script
+# values 'yes' or 'no'
+hestia_install_flags: 
+  apache: 'no'
+  phpfpm: 'yes'
+  multiphp: 'yes'
+  vsftpd: 'yes'
+  proftpd: 'no'
+  named: 'no'
+  mysql: 'yes'
+  postgresql: 'yes'
+  exim: 'no'
+  dovecot: 'no'
+  sieve: 'no'
+  clamav: 'no'
+  spamassassin: 'no'
+  iptables: 'yes'
+  fail2ban: 'yes'
+  quota: 'no'
+  api: 'yes'
+  port: '8083'
+  lang: 'en'
+
+# Install additional php versions.
+# Checks if it is already is installed, so you can list all desired php versions.
+# Only gets installed when installer_flag is set to: --multiplephp no
+hestia_additional_php:
+  - 8.3
+
+# should hestia generate a letsencrypt cert for the hostname
+hestia_generate_ssl: true
