@@ -8,6 +8,7 @@
      - '22'
      - '80'
      - '443'
+     - '8083'
 
 - name: Outgoing allow
   ufw:
