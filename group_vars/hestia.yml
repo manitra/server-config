@@ -12,7 +12,7 @@ hestia_install_flags:
   named: 'no'
   mysql: 'yes'
   postgresql: 'yes'
-  exim: 'no'
+  exim: 'yes'
   dovecot: 'no'
   sieve: 'no'
   clamav: 'no'
