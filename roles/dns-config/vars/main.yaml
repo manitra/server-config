@@ -2,8 +2,4 @@ A:
   - record: vps01
     value: 85.215.184.231
   - record: vps02
-    value: 85.215.184.232
-  - record: vps03
-    value: 85.215.184.233
-  - record: test
-      value: 102.16.127.245
+    value: 51.68.173.31
