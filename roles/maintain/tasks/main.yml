@@ -1,3 +1,14 @@
+
+
+- name: Ensure the hostname matches the one specified in inventory
+  ansible.builtin.hostname:
+    name: '{{ ansible_hostname }}'
+    use: debian
+  
+- name: Set timezone to EAT
+  community.general.timezone:
+    name: Etc/GMT+3
+
 - import_tasks : update-package.yml
 
 - import_tasks : update-ssh-keys.yml
