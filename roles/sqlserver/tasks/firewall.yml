@@ -1,0 +1,6 @@
+
+- name: Allow the default TCP port of Sql Server
+  ufw:
+    rule: allow 
+    port: '1433'
+    proto: tcp
