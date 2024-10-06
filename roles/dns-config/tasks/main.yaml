@@ -9,6 +9,7 @@
     record: "{{ item.record }}"
     value: "{{ item.value }}"
     ttl: 1
+    solo: true
     state: "present"
     account_email: "{{ cloudflare.email }}"
     account_api_key: "{{ cloudflare.api_key }}"
