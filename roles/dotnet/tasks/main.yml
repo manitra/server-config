@@ -1,0 +1,8 @@
+
+
+- name: Update nginx and dotnet 8
+  apt:
+    pkg: 
+      - nginx 
+      - dotnet8
+    state: latest

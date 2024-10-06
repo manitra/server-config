@@ -1,7 +1,4 @@
 ---
-- hosts: localhost
-  roles:
-    - dns-config
 
 - hosts: all
   roles:
@@ -10,3 +7,11 @@
 - hosts: hestia
   roles:
     - hestia
+
+- hosts: dotnet
+  roles:
+    - dotnet
+
+- hosts: sqlserver
+  roles:
+    - sqlserver

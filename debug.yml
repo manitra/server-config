@@ -1,0 +1,5 @@
+---
+
+- hosts: sqlserver
+  roles:
+    - sqlserver

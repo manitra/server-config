@@ -7,3 +7,8 @@ cloudflare:
 # Configuration for the hestia role
 hestia_admin_mail: YOUR EMAIL
 hestia_admin_pw: ADMIN PASSWORD
+
+# Sql Server configuration
+mssql:
+  sa_password: your strong password
+  pid: express  # evaluation, developer, express, web, standard, enterprise, or your 25 digit product key

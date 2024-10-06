@@ -1,0 +1,33 @@
+
+- name: Load config file
+  include_vars: .config.yml
+
+- name: Add microsoft repository key
+  ansible.builtin.apt_key:
+    url: https://packages.microsoft.com/keys/microsoft.asc
+    state: present
+
+- name: Add the mssql-server repository
+  ansible.builtin.get_url:
+    url: https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-2022.list
+    dest: /etc/apt/sources.list.d/mssql-server-2022.list
+
+- name: Install Sql Server
+  apt:
+    name: mssql-server
+    state: latest
+    update_cache: yes
+
+- name: Allow the default TCP port of Sql Server
+  ufw:
+    rule: allow 
+    port: '1433'
+    proto: tcp
+
+- name: configure sql server
+  ansible.builtin.command: /opt/mssql/bin/mssql-conf -n setup accept-eula
+  args:
+    creates: /lib/systemd/system/mssql-server.service
+  environment: 
+    MSSQL_SA_PASSWORD: "{{ mssql.sa_password }}"
+    MSSQL_PID: "{{ mssql.pid }}"
