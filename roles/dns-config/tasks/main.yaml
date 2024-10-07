@@ -8,10 +8,21 @@
     type: "A"
     record: "{{ item.record }}"
     value: "{{ item.value }}"
-    ttl: 1
     solo: true
     state: "present"
     account_email: "{{ cloudflare.email }}"
     account_api_key: "{{ cloudflare.api_key }}"
   loop: "{{ A }}"
+  when: cloudflare.enabled
+
+- name: Define CNAME DNS record for vps01
+  community.general.cloudflare_dns:
+    zone: "manitra.net"
+    type: "CNAME"
+    record: "{{ item.record }}"
+    value: "{{ item.value }}"
+    state: "present"
+    account_email: "{{ cloudflare.email }}"
+    account_api_key: "{{ cloudflare.api_key }}"
+  loop: "{{ CNAME }}"
   when: cloudflare.enabled

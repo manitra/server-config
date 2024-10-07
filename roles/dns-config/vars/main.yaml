@@ -3,3 +3,11 @@ A:
     value: 85.215.184.231
   - record: vps02
     value: 51.68.173.31
+
+CNAME:
+  - record: '@'
+    value: vps01
+  - record: www
+    value: vps01
+  - record: adj
+    value: vps02
