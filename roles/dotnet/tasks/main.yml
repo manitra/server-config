@@ -6,3 +6,11 @@
       - nginx 
       - dotnet8
     state: latest
+    register: apt_update
+
+- name: Restart nginx 
+  service:
+    name: nginx
+    state: restarted
+  when: apt_update.changed
+
