@@ -1,10 +1,12 @@
 
 
-- name: Update nginx and dotnet 8
+- name: Ensure nginx, dotnet8, certbot are up to date
   apt:
     pkg: 
       - nginx 
       - dotnet8
+      - certbot
+      - python3-certbot-nginx
     state: latest
     register: apt_update
 
