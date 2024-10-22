@@ -2,13 +2,13 @@
 
 - name: Ensure nginx, dotnet8, certbot are up to date
   apt:
-    pkg: 
+    name: 
       - nginx 
       - dotnet8
       - certbot
       - python3-certbot-nginx
     state: latest
-    register: apt_update
+  register: apt_update
 
 - name: Restart nginx 
   service:
