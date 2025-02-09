@@ -12,3 +12,16 @@ hestia_admin_pw: ADMIN PASSWORD
 mssql:
   sa_password: your strong password
   pid: express  # evaluation, developer, express, web, standard, enterprise, or your 25 digit product key
+
+# Keycloak configuration
+keycloak:
+  version: version
+  user: keycloak user
+  home: home directory
+  db_name: db name
+  db_user: db user
+  db_password: db password
+  admin_user: admin user
+  admin_password: admin password
+  domain_name: domain name
+  email_for_ssl: email for ssl

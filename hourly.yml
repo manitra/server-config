@@ -15,3 +15,7 @@
 - hosts: sqlserver
   roles:
     - sqlserver
+
+- hosts: keycloak
+  roles:
+    - keycloak

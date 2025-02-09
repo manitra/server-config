@@ -1,0 +1,151 @@
+- name: Load config file
+  include_vars: .config.yml
+
+- name: Install required packages
+  apt:
+    name:
+      - python3
+      - openjdk-17-jdk
+      - nginx
+      - postgresql
+      - postgresql-contrib
+      - certbot
+      - python3-certbot-nginx
+      - python3-psycopg2 
+    state: present
+    update_cache: yes
+
+- name: Create Keycloak user
+  user:
+    name: "{{ keycloak.user }}"
+    system: yes
+    shell: "/bin/bash"
+
+- name: Download Keycloak
+  get_url:
+    url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak.version }}/keycloak-{{ keycloak.version }}.tar.gz"
+    dest: "/tmp/keycloak.tar.gz"
+
+- name: Extract Keycloak
+  ansible.builtin.unarchive:
+    src: "/tmp/keycloak.tar.gz"
+    dest: "/opt/"
+    remote_src: yes
+    extra_opts: [--strip-components=1]
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+
+- name: Set Keycloak home directory
+  file:
+    path: "{{ keycloak.home }}"
+    state: directory
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+    mode: "0755"
+
+- name: Ensure postgres user has proper permissions
+  file:
+    path: /var/lib/postgresql
+    owner: postgres
+    group: postgres
+    mode: '0700'
+    state: directory
+
+- name: Configure PostgreSQL authentication
+  lineinfile:
+    path: /etc/postgresql/14/main/pg_hba.conf
+    regexp: '^local\s+all\s+postgres\s+peer'
+    line: 'local   all             postgres                                trust'
+    backup: yes
+  register: pg_hba_conf
+
+- name: Restart PostgreSQL
+  systemd:
+    name: postgresql
+    state: restarted
+  when: pg_hba_conf.changed
+
+- name: Configure PostgreSQL database for Keycloak
+  postgresql_db:
+    name: "{{ keycloak.db_name }}"
+    state: present
+  #become_user: postgres
+
+- name: Create PostgreSQL user for Keycloak
+  postgresql_user:
+    db: "{{ keycloak.db_name }}"
+    name: "{{ keycloak.db_user }}"
+    password: "{{ keycloak.db_password }}"
+    priv: "ALL"
+    state: present
+  #become_user: postgres
+
+- name: Set Keycloak database configuration
+  copy:
+    dest: "{{ keycloak.home }}/conf/keycloak.conf"
+    content: |
+      db=postgres
+      db-url-host=localhost
+      db-username={{ keycloak.db_user }}
+      db-password={{ keycloak.db_password }}
+      hostname={{ keycloak.domain_name }}
+      http-enabled=true
+      https-port=8443
+      proxy=passthrough
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+    mode: "0644"
+
+- name: Create systemd service for Keycloak
+  copy:
+    dest: "/etc/systemd/system/keycloak.service"
+    content: |
+      [Unit]
+      Description=Keycloak Server
+      After=network.target postgresql.service
+
+      [Service]
+      User={{ keycloak_user }}
+      WorkingDirectory={{ keycloak_home }}
+      ExecStart={{ keycloak_home }}/bin/kc.sh start --proxy-headers forwarded --http-enabled=true
+      Restart=always
+      LimitNOFILE=102400
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart Keycloak
+
+- name: Enable and start Keycloak service
+  systemd:
+    name: keycloak
+    enabled: yes
+    state: started
+
+- name: Create Nginx configuration
+  copy:
+    dest: "/etc/nginx/sites-available/keycloak"
+    content: |
+      server {
+          listen 80;
+          server_name {{ keycloak.domain_name }};
+
+          location / {
+              proxy_pass http://127.0.0.1:8080;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+          }
+      }
+  notify: Restart Nginx
+
+- name: Enable Nginx configuration
+  file:
+    src: "/etc/nginx/sites-available/keycloak"
+    dest: "/etc/nginx/sites-enabled/keycloak"
+    state: link
+  notify: Restart Nginx
+
+- name: Obtain SSL certificate using Certbot
+  command: "certbot --nginx -d {{ keycloak.domain_name }} --email {{ email_for_ssl }} --agree-tos --redirect --non-interactive"
+  notify: Restart Nginx
