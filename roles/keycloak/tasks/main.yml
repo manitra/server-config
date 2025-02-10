@@ -29,7 +29,7 @@
 - name: Extract Keycloak
   ansible.builtin.unarchive:
     src: "/tmp/keycloak.tar.gz"
-    dest: "/opt/"
+    dest: "/opt/keycloak/"
     remote_src: yes
     extra_opts: [--strip-components=1]
     owner: "{{ keycloak.user }}"
@@ -105,9 +105,11 @@
       After=network.target postgresql.service
 
       [Service]
-      User={{ keycloak_user }}
-      WorkingDirectory={{ keycloak_home }}
-      ExecStart={{ keycloak_home }}/bin/kc.sh start --proxy-headers forwarded --http-enabled=true
+      User={{ keycloak.user }}
+      WorkingDirectory={{ keycloak.home }}
+      Environment="KEYCLOAK_ADMIN={{ keycloak.admin_user }}"
+      Environment="KEYCLOAK_ADMIN_PASSWORD={{ keycloak.admin_password }}"
+      ExecStart={{ keycloak.home }}/bin/kc.sh start --proxy-headers xforwarded --http-enabled=true
       Restart=always
       LimitNOFILE=102400
 
@@ -136,7 +138,26 @@
               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $scheme;
           }
+
+          listen 443 ssl; # managed by Certbot
+          ssl_certificate /etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem; # managed by Certbot
+          ssl_certificate_key /etc/letsencrypt/live/{{ keycloak.domain_name }}/privkey.pem; # managed by Certbot
+          include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
       }
+      server {
+          if ($host = {{ keycloak.domain_name }}) {
+              return 301 https://$host$request_uri;
+          } # managed by Certbot
+
+
+          listen 80;
+          server_name {{ keycloak.domain_name }};
+          return 404; # managed by Certbot
+
+
+      }      
   notify: Restart Nginx
 
 - name: Enable Nginx configuration
@@ -147,5 +168,5 @@
   notify: Restart Nginx
 
 - name: Obtain SSL certificate using Certbot
-  command: "certbot --nginx -d {{ keycloak.domain_name }} --email {{ email_for_ssl }} --agree-tos --redirect --non-interactive"
+  command: "certbot --nginx -d {{ keycloak.domain_name }} --email {{ keycloak.email_for_ssl }} --agree-tos --redirect --non-interactive"
   notify: Restart Nginx
