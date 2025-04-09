@@ -7,7 +7,7 @@
   
 - name: Set timezone to EAT
   community.general.timezone:
-    name: Etc/GMT+3
+    name: Africa/Nairobi
 
 - import_tasks : update-package.yml
 
