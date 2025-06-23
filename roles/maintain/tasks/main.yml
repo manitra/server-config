@@ -1,16 +1,17 @@
-
-
 - name: Ensure the hostname matches the one specified in inventory
   ansible.builtin.hostname:
     name: '{{ ansible_hostname }}'
     use: debian
-  
+
 - name: Set timezone to EAT
   community.general.timezone:
     name: Africa/Nairobi
 
-- import_tasks : update-package.yml
+- import_tasks: clean-logs.yml
 
-- import_tasks : update-ssh-keys.yml
+- import_tasks: update-package.yml
 
-- import_tasks : ufw.yml
+- import_tasks: update-ssh-keys.yml
+
+- import_tasks: ufw.yml
+

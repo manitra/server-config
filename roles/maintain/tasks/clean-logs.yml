@@ -1,0 +1,3 @@
+- name: Vacuum journal logs to 50MB
+  ansible.builtin.command: journalctl --vacuum-size=50M
+  become: true
