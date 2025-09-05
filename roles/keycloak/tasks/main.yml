@@ -170,3 +170,9 @@
 - name: Obtain SSL certificate using Certbot
   command: "certbot --nginx -d {{ keycloak.domain_name }} --email {{ keycloak.email_for_ssl }} --agree-tos --redirect --non-interactive"
   notify: Restart Nginx
+
+- name: Remove Keycloak archive from /tmp
+  file:
+    path: /tmp/keycloak.tar.gz
+    state: absent
+
