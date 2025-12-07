@@ -21,19 +21,53 @@
     system: yes
     shell: "/bin/bash"
 
-- name: Download Keycloak
+- name: Check for installed Keycloak version marker
+  stat:
+    path: "{{ keycloak.home }}/.installed_version"
+  register: keycloak_version_file
+
+- name: Read installed Keycloak version
+  ansible.builtin.slurp:
+    path: "{{ keycloak.home }}/.installed_version"
+  register: keycloak_version_slurp
+  when: keycloak_version_file.stat.exists
+
+- name: Set installed version fact
+  set_fact:
+    keycloak_installed_version: "{{ (keycloak_version_slurp.content | b64decode).strip() }}"
+  when: keycloak_version_file.stat.exists
+
+- name: Download Keycloak (only if requested version is not installed)
   get_url:
     url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak.version }}/keycloak-{{ keycloak.version }}.tar.gz"
-    dest: "/tmp/keycloak.tar.gz"
+    dest: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
+    mode: '0644'
+  when: (keycloak_installed_version | default('')) != keycloak.version
 
-- name: Extract Keycloak
+- name: Extract Keycloak (only if requested version is not installed)
   ansible.builtin.unarchive:
-    src: "/tmp/keycloak.tar.gz"
-    dest: "/opt/keycloak/"
+    src: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
+    dest: "{{ keycloak.home }}"
     remote_src: yes
     extra_opts: [--strip-components=1]
     owner: "{{ keycloak.user }}"
     group: "{{ keycloak.user }}"
+  when: (keycloak_installed_version | default('')) != keycloak.version
+
+- name: Write installed Keycloak version marker
+  copy:
+    dest: "{{ keycloak.home }}/.installed_version"
+    content: "{{ keycloak.version }}"
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+    mode: '0644'
+  when: (keycloak_installed_version | default('')) != keycloak.version
+
+- name: Remove temporary Keycloak archive (for this version)
+  file:
+    path: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
+    state: absent
+  when: (keycloak_installed_version | default('')) != keycloak.version
 
 - name: Set Keycloak home directory
   file:
