@@ -1,3 +1,10 @@
+---
+
+- name: Ensure `ufw` package is installed
+  package:
+    name: ufw
+    state: present
+  become: true
 
 - name: Allow SSH, HTTP and HTTPS only
   ufw:

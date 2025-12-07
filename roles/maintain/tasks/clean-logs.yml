@@ -3,7 +3,7 @@
   become: true
 
 - name: Clean nginx logs
-  ansible.builtin.command: rm /var/log/nginx/domains/*.log.1 /var/log/nginx/domains/*.log.*.gz
+  ansible.builtin.command: rm -f /var/log/nginx/domains/*.log.*
   become: true
   ignore_errors: true
 
