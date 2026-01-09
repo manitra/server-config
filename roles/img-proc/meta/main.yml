@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: manitra
+  description: Install image processing utilities
+  license: MIT
+  min_ansible_version: 2.9
+dependencies: []

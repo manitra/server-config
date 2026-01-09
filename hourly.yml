@@ -19,3 +19,7 @@
 - hosts: keycloak
   roles:
     - keycloak
+
+- hosts: imgproc
+  roles:
+    - img-proc

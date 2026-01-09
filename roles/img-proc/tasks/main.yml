@@ -1,0 +1,12 @@
+---
+- name: Ensure image processing packages are installed
+  apt:
+    name:
+      - jpegoptim
+      - optipng
+      - pngquant
+      - gifsicle
+      - webp
+      - imagemagick
+    state: latest
+    update_cache: yes
