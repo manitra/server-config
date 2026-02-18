@@ -7,13 +7,10 @@
   community.general.timezone:
     name: Africa/Nairobi
 
-- import_tasks: clean-logs.yml
-
 - import_tasks: update-package.yml
 
 - import_tasks: update-ssh-keys.yml
 
 - import_tasks: ufw.yml
 
-# clean again after updates to clear caches
 - import_tasks: clean-logs.yml
