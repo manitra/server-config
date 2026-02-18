@@ -8,8 +8,8 @@ A:
 
 CNAME:
   - record: '@'
-    value: vps01.manitra.net
+    value: vps03.manitra.net
   - record: www
-    value: vps01.manitra.net
+    value: vps03.manitra.net
   - record: merge
-    value: vps01.manitra.net
+    value: vps03.manitra.net
