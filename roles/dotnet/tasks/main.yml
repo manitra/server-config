@@ -1,10 +1,10 @@
 
 
-- name: Ensure nginx, dotnet8, certbot are up to date
+- name: Ensure nginx, dotnet10, certbot are up to date
   apt:
     name: 
       - nginx 
-      - dotnet8
+      - dotnet10
       - certbot
       - python3-certbot-nginx
     state: latest
