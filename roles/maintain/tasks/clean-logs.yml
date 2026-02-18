@@ -3,16 +3,16 @@
   become: true
 
 - name: Clean nginx logs
-  ansible.builtin.command: rm -f /var/log/nginx/domains/*.log.*
+  ansible.builtin.shell: rm -f /var/log/nginx/domains/*.log.*
   become: true
   ignore_errors: true
 
 - name: Truncate nginx logs to last 1000 lines
-  ansible.builtin.command: find /var/log/nginx -type f -name "*.log" -exec sh -c 'tail -n 1000 "$1" > "$1.tmp" && mv "$1.tmp" "$1"' _ {} \;
+  ansible.builtin.shell: find /var/log/nginx -type f -name "*.log" -exec sh -c 'tail -n 1000 "$1" > "$1.tmp" && mv "$1.tmp" "$1"' _ {} \;
   ignore_errors: true
 
 - name: Clean snapd cache
-  ansible.builtin.command: rm -rf /var/lib/snapd/cache/*
+  ansible.builtin.shell: rm -rf /var/lib/snapd/cache/*
   become: true
   ignore_errors: true
 
