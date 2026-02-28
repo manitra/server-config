@@ -1,7 +1,6 @@
-- name: Update user SSH keys
+- name: Update user SSH keys (exclusive - removes unknown keys)
   ansible.posix.authorized_key:
     user: '{{ ansible_user }}'
-    key: '{{ lookup(''file'', item) }}'
+    key: "{% for f in lookup('fileglob', 'user-keys/*', wantlist=True) %}{{ lookup('file', f) }}\n{% endfor %}"
     state: present
-  with_fileglob:
-    - user-keys/*
+    exclusive: true
