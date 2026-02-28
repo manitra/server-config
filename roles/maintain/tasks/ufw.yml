@@ -6,25 +6,50 @@
     state: present
   become: true
 
-- name: Allow SSH, HTTP and HTTPS only
-  ufw:
-    rule: allow 
-    port: "{{ item }}"
-    proto: tcp
-  with_items:
-     - '22'
-     - '80'
-     - '443'
-     - '8083'
+- name: Reset and reconfigure UFW
+  block:
+    - name: Reset UFW to wipe any unknown rules
+      ufw:
+        state: reset
 
-- name: Outgoing allow
-  ufw:
-    state: enabled
-    direction: outgoing
-    policy: allow
+    - name: Set default incoming policy to deny
+      ufw:
+        direction: incoming
+        policy: deny
 
-- name: Incoming deny
-  ufw:
-    state: enabled
-    direction: incoming
-    policy: deny
+    - name: Set default outgoing policy to allow
+      ufw:
+        direction: outgoing
+        policy: allow
+
+    - name: Allow SSH, HTTP, HTTPS and HestiaCP only
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      with_items:
+         - '22'
+         - '80'
+         - '443'
+         - '8083'
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+  rescue:
+    - name: "RESCUE: Allow SSH before re-enabling firewall"
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: "RESCUE: Re-enable UFW to avoid leaving server open"
+      ufw:
+        state: enabled
+        direction: incoming
+        policy: deny
+
+    - name: Fail the play after securing the firewall
+      fail:
+        msg: "UFW reconfiguration failed. Firewall re-enabled with SSH allowed. Check the errors above."
