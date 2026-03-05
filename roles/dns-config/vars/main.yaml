@@ -1,10 +1,10 @@
 A:
-  - record: vps01
-    value: 85.215.184.231
   - record: vps03
     value: 51.75.203.179
   - record: vps06
     value : 5.135.152.108
+  - record: vps11
+    value: 49.13.231.102
 
 CNAME:
   - record: '@'
