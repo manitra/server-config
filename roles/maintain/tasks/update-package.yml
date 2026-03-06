@@ -1,7 +1,10 @@
 
+- name: Repair any interrupted dpkg state
+  command: dpkg --configure -a
+  changed_when: false
+
 - name: Update APT packages
   apt:
     upgrade: dist
     update_cache: yes
-  tags : 
-    - update-package
+    lock_timeout: 1800
