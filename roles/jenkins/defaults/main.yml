@@ -1,0 +1,7 @@
+---
+jenkins_repo_url: https://pkg.jenkins.io/debian-stable
+jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+jenkins_repo_key_path: /usr/share/keyrings/jenkins-keyring.asc
+jenkins_http_port: 8080
+jenkins_listen_address: 127.0.0.1
+jenkins_home: /var/lib/jenkins

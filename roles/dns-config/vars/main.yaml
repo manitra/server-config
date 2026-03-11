@@ -17,3 +17,5 @@ CNAME:
     value: vps03.manitra.net
   - record: merge
     value: vps03.manitra.net
+  - record: build
+    value: vps12.manitra.net

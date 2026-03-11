@@ -23,5 +23,8 @@ keycloak:
   db_password: db password
   admin_user: admin user
   admin_password: admin password
-  domain_name: domain name
-  email_for_ssl: email for ssl
+
+# Jenkins configuration
+jenkins:
+  admin_user: admin user
+  admin_password: admin password

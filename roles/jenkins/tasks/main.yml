@@ -1,0 +1,295 @@
+---
+- name: Load config file
+  include_vars: .config.yml
+
+- name: Ensure Jenkins admin secrets are configured
+  ansible.builtin.assert:
+    that:
+      - jenkins is defined
+      - jenkins.admin_user is defined
+      - jenkins.admin_user | length > 0
+      - jenkins.admin_password is defined
+      - jenkins.admin_password | length > 0
+      - jenkins_domain_name is defined
+      - jenkins_domain_name | length > 0
+      - jenkins_email_for_ssl is defined
+      - jenkins_email_for_ssl | length > 0
+    fail_msg: Set Jenkins admin credentials in .config.yml and Jenkins domain/email settings in group_vars/jenkins.yml before running this role.
+
+- name: Install Jenkins prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - fontconfig
+      - openjdk-17-jre
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+    update_cache: yes
+
+- name: Ensure Jenkins apt keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Install Jenkins apt repository key
+  ansible.builtin.get_url:
+    url: "{{ jenkins_repo_key_url }}"
+    dest: "{{ jenkins_repo_key_path }}"
+    mode: '0644'
+
+- name: Configure Jenkins apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by={{ jenkins_repo_key_path }}] {{ jenkins_repo_url }} binary/"
+    state: present
+    filename: jenkins
+    update_cache: yes
+
+- name: Install or upgrade Jenkins stable package
+  ansible.builtin.apt:
+    name: jenkins
+    state: latest
+    update_cache: yes
+
+- name: Ensure Jenkins service override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    mode: '0755'
+
+- name: Configure Jenkins systemd override
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    mode: '0644'
+    content: |
+      [Service]
+      Environment="JAVA_OPTS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
+      Environment="JENKINS_OPTS=--httpPort={{ jenkins_http_port }} --httpListenAddress={{ jenkins_listen_address }}"
+  notify:
+    - Reload systemd
+    - Restart Jenkins
+
+- name: Ensure Jenkins init script directory exists
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/init.groovy.d"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: '0700'
+
+- name: Configure Jenkins security bootstrap script
+  ansible.builtin.copy:
+    dest: "{{ jenkins_home }}/init.groovy.d/basic-security.groovy"
+    owner: jenkins
+    group: jenkins
+    mode: '0600'
+    content: |
+      import hudson.model.User
+      import hudson.security.FullControlOnceLoggedInAuthorizationStrategy
+      import hudson.security.HudsonPrivateSecurityRealm
+      import hudson.security.csrf.DefaultCrumbIssuer
+      import jenkins.install.InstallState
+      import jenkins.model.Jenkins
+
+      def instance = Jenkins.get()
+      def adminUsername = "{{ jenkins.admin_user }}"
+      def adminPassword = "{{ jenkins.admin_password }}"
+
+      def realm = instance.getSecurityRealm()
+      if (!(realm instanceof HudsonPrivateSecurityRealm)) {
+          realm = new HudsonPrivateSecurityRealm(false)
+          instance.setSecurityRealm(realm)
+      }
+
+      if (User.getById(adminUsername, false) == null) {
+          realm.createAccount(adminUsername, adminPassword)
+      }
+
+      def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+      strategy.setAllowAnonymousRead(false)
+      instance.setAuthorizationStrategy(strategy)
+      instance.setCrumbIssuer(new DefaultCrumbIssuer(true))
+      instance.setSlaveAgentPort(-1)
+      instance.setInstallState(InstallState.INITIAL_SETUP_COMPLETED)
+      instance.save()
+  notify:
+    - Restart Jenkins
+
+- name: Ensure Jenkins service is enabled and started
+  ansible.builtin.systemd:
+    name: jenkins
+    enabled: yes
+    state: started
+
+- name: Apply pending Jenkins handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Jenkins to accept local connections
+  ansible.builtin.wait_for:
+    host: "{{ jenkins_listen_address }}"
+    port: "{{ jenkins_http_port }}"
+    delay: 5
+    timeout: 300
+
+- name: Ensure ACME webroot exists
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    mode: '0755'
+
+- name: Check whether Jenkins TLS certificate already exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ jenkins_domain_name }}/fullchain.pem"
+  register: jenkins_tls_certificate
+
+- name: Configure bootstrap Jenkins nginx site
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/jenkins
+    mode: '0644'
+    content: |
+      server {
+          listen 80;
+          server_name {{ jenkins_domain_name }};
+
+          client_max_body_size 1g;
+
+          location /.well-known/acme-challenge/ {
+              root /var/www/html;
+          }
+
+          location / {
+              proxy_pass http://{{ jenkins_listen_address }}:{{ jenkins_http_port }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_set_header X-Forwarded-Port $server_port;
+              proxy_http_version 1.1;
+              proxy_request_buffering off;
+              proxy_buffering off;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+          }
+      }
+  when: not jenkins_tls_certificate.stat.exists
+  notify:
+    - Reload Nginx
+
+- name: Enable Jenkins nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/jenkins
+    dest: /etc/nginx/sites-enabled/jenkins
+    state: link
+  when: not jenkins_tls_certificate.stat.exists
+  notify:
+    - Reload Nginx
+
+- name: Ensure Nginx is enabled and started for bootstrap
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: yes
+    state: started
+  when: not jenkins_tls_certificate.stat.exists
+
+- name: Apply pending nginx handlers before requesting TLS certificate
+  ansible.builtin.meta: flush_handlers
+  when: not jenkins_tls_certificate.stat.exists
+
+- name: Request Jenkins TLS certificate
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - -w
+      - /var/www/html
+      - -d
+      - "{{ jenkins_domain_name }}"
+      - --email
+      - "{{ jenkins_email_for_ssl }}"
+      - --agree-tos
+      - --non-interactive
+      - --keep-until-expiring
+  when: not jenkins_tls_certificate.stat.exists
+
+- name: Refresh Jenkins TLS certificate status
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ jenkins_domain_name }}/fullchain.pem"
+  register: jenkins_tls_certificate
+
+- name: Configure Jenkins HTTPS nginx site
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/jenkins
+    mode: '0644'
+    content: |
+      server {
+          listen 80;
+          server_name {{ jenkins_domain_name }};
+
+          location /.well-known/acme-challenge/ {
+              root /var/www/html;
+          }
+
+          location / {
+              return 301 https://$host$request_uri;
+          }
+      }
+
+      server {
+          listen 443 ssl;
+          server_name {{ jenkins_domain_name }};
+
+          ssl_certificate /etc/letsencrypt/live/{{ jenkins_domain_name }}/fullchain.pem;
+          ssl_certificate_key /etc/letsencrypt/live/{{ jenkins_domain_name }}/privkey.pem;
+          include /etc/letsencrypt/options-ssl-nginx.conf;
+          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+          client_max_body_size 1g;
+
+          location / {
+              proxy_pass http://{{ jenkins_listen_address }}:{{ jenkins_http_port }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_set_header X-Forwarded-Proto https;
+              proxy_set_header X-Forwarded-Port 443;
+              proxy_http_version 1.1;
+              proxy_request_buffering off;
+              proxy_buffering off;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+          }
+      }
+  when: jenkins_tls_certificate.stat.exists
+  notify:
+    - Reload Nginx
+
+- name: Enable Jenkins nginx site after TLS configuration
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/jenkins
+    dest: /etc/nginx/sites-enabled/jenkins
+    state: link
+  when: jenkins_tls_certificate.stat.exists
+  notify:
+    - Reload Nginx
+
+- name: Ensure Nginx is enabled and started
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: yes
+    state: started
+
+- name: Ensure certbot renewal timer is enabled
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: yes
+    state: started
+
+- name: Apply final nginx handlers
+  ansible.builtin.meta: flush_handlers
