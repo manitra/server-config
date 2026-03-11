@@ -2,7 +2,7 @@
 - name: Load config file
   include_vars: .config.yml
 
-- name: Define A DNS record for vps01
+- name: A DNS records
   community.general.cloudflare_dns:
     zone: "manitra.net"
     type: "A"
@@ -15,7 +15,20 @@
   loop: "{{ A }}"
   when: cloudflare.enabled
 
-- name: Define CNAME DNS record for vps01
+- name: AAAA DNS records
+  community.general.cloudflare_dns:
+    zone: "manitra.net"
+    type: "AAAA"
+    record: "{{ item.record }}"
+    value: "{{ item.value }}"
+    solo: true
+    state: "present"
+    account_email: "{{ cloudflare.email }}"
+    account_api_key: "{{ cloudflare.api_key }}"
+  loop: "{{ AAAA }}"
+  when: cloudflare.enabled
+
+- name: CNAME DNS records
   community.general.cloudflare_dns:
     zone: "manitra.net"
     type: "CNAME"
