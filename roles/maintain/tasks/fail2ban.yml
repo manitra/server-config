@@ -1,0 +1,13 @@
+---
+- name: Ensure fail2ban is installed
+  package:
+    name: fail2ban
+    state: present
+  become: true
+
+- name: Ensure fail2ban is enabled and running
+  service:
+    name: fail2ban
+    state: started
+    enabled: true
+  become: true

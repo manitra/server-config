@@ -13,4 +13,7 @@
 
 - import_tasks: ufw.yml
 
+- import_tasks: fail2ban.yml
+  when: "'hestia' not in group_names"
+
 - import_tasks: clean-logs.yml
