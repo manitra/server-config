@@ -1,8 +1,26 @@
+---
 - name: Load config file
-  include_vars: .config.yml
+  ansible.builtin.include_vars: .config.yml
+
+- name: Ensure Keycloak settings are configured
+  ansible.builtin.assert:
+    that:
+      - keycloak is defined
+      - keycloak.user is defined
+      - keycloak.user | length > 0
+      - keycloak.home is defined
+      - keycloak.home | length > 0
+      - keycloak.db_name is defined
+      - keycloak.db_user is defined
+      - keycloak.db_password is defined
+      - keycloak.admin_user is defined
+      - keycloak.admin_password is defined
+      - keycloak.domain_name is defined
+      - keycloak.email_for_ssl is defined
+    fail_msg: Set the required Keycloak variables in .config.yml before running this role.
 
 - name: Install required packages
-  apt:
+  ansible.builtin.apt:
     name:
       - python3
       - openjdk-17-jdk
@@ -11,18 +29,51 @@
       - postgresql-contrib
       - certbot
       - python3-certbot-nginx
-      - python3-psycopg2 
+      - python3-psycopg2
     state: present
-    update_cache: yes
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Resolve target Keycloak release from upstream
+  when: keycloak_track_latest | bool
+  block:
+    - name: Query latest Keycloak release metadata
+      ansible.builtin.uri:
+        url: "{{ keycloak_release_api_url }}"
+        return_content: true
+        headers:
+          Accept: application/vnd.github+json
+          User-Agent: ansible-keycloak-role
+      register: keycloak_release_metadata
+      changed_when: false
+
+    - name: Set target Keycloak version from upstream release metadata
+      ansible.builtin.set_fact:
+        keycloak_target_version: "{{ keycloak_release_metadata.json.tag_name | regex_replace('^v', '') }}"
+
+- name: Set pinned Keycloak version
+  ansible.builtin.set_fact:
+    keycloak_target_version: "{{ keycloak.version }}"
+  when: not (keycloak_track_latest | bool)
 
 - name: Create Keycloak user
-  user:
+  ansible.builtin.user:
     name: "{{ keycloak.user }}"
-    system: yes
-    shell: "/bin/bash"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ keycloak.home }}"
+    create_home: false
+
+- name: Ensure Keycloak home directory exists
+  ansible.builtin.file:
+    path: "{{ keycloak.home }}"
+    state: directory
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+    mode: "0755"
 
 - name: Check for installed Keycloak version marker
-  stat:
+  ansible.builtin.stat:
     path: "{{ keycloak.home }}/.installed_version"
   register: keycloak_version_file
 
@@ -33,90 +84,112 @@
   when: keycloak_version_file.stat.exists
 
 - name: Set installed version fact
-  set_fact:
+  ansible.builtin.set_fact:
     keycloak_installed_version: "{{ (keycloak_version_slurp.content | b64decode).strip() }}"
   when: keycloak_version_file.stat.exists
 
-- name: Download Keycloak (only if requested version is not installed)
-  get_url:
-    url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak.version }}/keycloak-{{ keycloak.version }}.tar.gz"
-    dest: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
-    mode: '0644'
-  when: (keycloak_installed_version | default('')) != keycloak.version
+- name: Gather service facts
+  ansible.builtin.service_facts:
 
-- name: Extract Keycloak (only if requested version is not installed)
+- name: Stop Keycloak before upgrade
+  ansible.builtin.systemd:
+    name: keycloak
+    state: stopped
+  when:
+    - (keycloak_installed_version | default('')) != keycloak_target_version
+    - "'keycloak.service' in ansible_facts.services"
+
+- name: Download Keycloak archive when target version is not installed
+  ansible.builtin.get_url:
+    url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak_target_version }}/keycloak-{{ keycloak_target_version }}.tar.gz"
+    dest: "/tmp/keycloak-{{ keycloak_target_version }}.tar.gz"
+    mode: "0644"
+  when: (keycloak_installed_version | default('')) != keycloak_target_version
+
+- name: Extract Keycloak when target version is not installed
   ansible.builtin.unarchive:
-    src: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
+    src: "/tmp/keycloak-{{ keycloak_target_version }}.tar.gz"
     dest: "{{ keycloak.home }}"
-    remote_src: yes
-    extra_opts: [--strip-components=1]
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
     owner: "{{ keycloak.user }}"
     group: "{{ keycloak.user }}"
-  when: (keycloak_installed_version | default('')) != keycloak.version
+  when: (keycloak_installed_version | default('')) != keycloak_target_version
+  notify: Restart Keycloak
 
 - name: Write installed Keycloak version marker
-  copy:
+  ansible.builtin.copy:
     dest: "{{ keycloak.home }}/.installed_version"
-    content: "{{ keycloak.version }}"
+    content: "{{ keycloak_target_version }}\n"
     owner: "{{ keycloak.user }}"
     group: "{{ keycloak.user }}"
-    mode: '0644'
-  when: (keycloak_installed_version | default('')) != keycloak.version
+    mode: "0644"
+  when: (keycloak_installed_version | default('')) != keycloak_target_version
 
-- name: Remove temporary Keycloak archive (for this version)
-  file:
-    path: "/tmp/keycloak-{{ keycloak.version }}.tar.gz"
+- name: Remove temporary Keycloak archive
+  ansible.builtin.file:
+    path: "/tmp/keycloak-{{ keycloak_target_version }}.tar.gz"
     state: absent
-  when: (keycloak_installed_version | default('')) != keycloak.version
-
-- name: Set Keycloak home directory
-  file:
-    path: "{{ keycloak.home }}"
-    state: directory
-    owner: "{{ keycloak.user }}"
-    group: "{{ keycloak.user }}"
-    mode: "0755"
+  when: (keycloak_installed_version | default('')) != keycloak_target_version
 
 - name: Ensure postgres user has proper permissions
-  file:
+  ansible.builtin.file:
     path: /var/lib/postgresql
     owner: postgres
     group: postgres
-    mode: '0700'
+    mode: "0700"
     state: directory
 
-- name: Configure PostgreSQL authentication
-  lineinfile:
-    path: /etc/postgresql/14/main/pg_hba.conf
-    regexp: '^local\s+all\s+postgres\s+peer'
+- name: Find PostgreSQL pg_hba.conf
+  ansible.builtin.find:
+    paths: /etc/postgresql
+    patterns: pg_hba.conf
+    recurse: true
+    file_type: file
+  register: keycloak_pg_hba_files
+
+- name: Ensure PostgreSQL configuration file was found
+  ansible.builtin.assert:
+    that:
+      - keycloak_pg_hba_files.matched | int > 0
+    fail_msg: Could not locate pg_hba.conf under /etc/postgresql.
+
+- name: Configure PostgreSQL authentication for local postgres access
+  ansible.builtin.lineinfile:
+    path: "{{ (keycloak_pg_hba_files.files | map(attribute='path') | sort | first) }}"
+    regexp: '^local\s+all\s+postgres\s+'
     line: 'local   all             postgres                                trust'
-    backup: yes
+    backup: true
   register: pg_hba_conf
 
-- name: Restart PostgreSQL
-  systemd:
+- name: Restart PostgreSQL when authentication config changes
+  ansible.builtin.systemd:
     name: postgresql
     state: restarted
   when: pg_hba_conf.changed
 
 - name: Configure PostgreSQL database for Keycloak
-  postgresql_db:
+  become_user: postgres
+  community.postgresql.postgresql_db:
     name: "{{ keycloak.db_name }}"
     state: present
-  #become_user: postgres
 
 - name: Create PostgreSQL user for Keycloak
-  postgresql_user:
+  become_user: postgres
+  community.postgresql.postgresql_user:
     db: "{{ keycloak.db_name }}"
     name: "{{ keycloak.db_user }}"
     password: "{{ keycloak.db_password }}"
     priv: "ALL"
     state: present
-  #become_user: postgres
 
 - name: Set Keycloak database configuration
-  copy:
+  ansible.builtin.copy:
     dest: "{{ keycloak.home }}/conf/keycloak.conf"
+    owner: "{{ keycloak.user }}"
+    group: "{{ keycloak.user }}"
+    mode: "0640"
     content: |
       db=postgres
       db-url-host=localhost
@@ -124,89 +197,208 @@
       db-password={{ keycloak.db_password }}
       hostname={{ keycloak.domain_name }}
       http-enabled=true
-      https-port=8443
-      proxy=passthrough
-    owner: "{{ keycloak.user }}"
-    group: "{{ keycloak.user }}"
-    mode: "0644"
+      http-port={{ keycloak_http_port }}
+      proxy-headers=xforwarded
+  notify: Restart Keycloak
 
 - name: Create systemd service for Keycloak
-  copy:
-    dest: "/etc/systemd/system/keycloak.service"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/keycloak.service
+    mode: "0644"
     content: |
       [Unit]
       Description=Keycloak Server
       After=network.target postgresql.service
+      Wants=postgresql.service
 
       [Service]
       User={{ keycloak.user }}
+      Group={{ keycloak.user }}
       WorkingDirectory={{ keycloak.home }}
       Environment="KEYCLOAK_ADMIN={{ keycloak.admin_user }}"
       Environment="KEYCLOAK_ADMIN_PASSWORD={{ keycloak.admin_password }}"
-      ExecStart={{ keycloak.home }}/bin/kc.sh start --proxy-headers xforwarded --http-enabled=true
+      ExecStart={{ keycloak.home }}/bin/kc.sh start --http-enabled=true --http-port={{ keycloak_http_port }} --proxy-headers=xforwarded
       Restart=always
+      RestartSec=5
       LimitNOFILE=102400
 
       [Install]
       WantedBy=multi-user.target
-  notify: Restart Keycloak
+  notify:
+    - Reload systemd
+    - Restart Keycloak
 
-- name: Enable and start Keycloak service
-  systemd:
+- name: Ensure Keycloak service is enabled and started
+  ansible.builtin.systemd:
     name: keycloak
-    enabled: yes
+    enabled: true
     state: started
 
-- name: Create Nginx configuration
-  copy:
-    dest: "/etc/nginx/sites-available/keycloak"
+- name: Apply pending Keycloak handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Keycloak to accept local connections
+  ansible.builtin.wait_for:
+    host: "{{ keycloak_listen_address }}"
+    port: "{{ keycloak_http_port }}"
+    delay: 5
+    timeout: 300
+
+- name: Ensure ACME webroot exists
+  ansible.builtin.file:
+    path: /var/www/html
+    state: directory
+    mode: "0755"
+
+- name: Check whether Keycloak TLS certificate already exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem"
+  register: keycloak_tls_certificate
+
+- name: Configure bootstrap Keycloak nginx site
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/keycloak
+    mode: "0644"
     content: |
       server {
           listen 80;
           server_name {{ keycloak.domain_name }};
 
+          location /.well-known/acme-challenge/ {
+              root /var/www/html;
+          }
+
           location / {
-              proxy_pass http://127.0.0.1:8080;
+              proxy_pass http://{{ keycloak_listen_address }}:{{ keycloak_http_port }};
               proxy_set_header Host $host;
               proxy_set_header X-Real-IP $remote_addr;
               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
               proxy_set_header X-Forwarded-Proto $scheme;
           }
-
-          listen 443 ssl; # managed by Certbot
-          ssl_certificate /etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem; # managed by Certbot
-          ssl_certificate_key /etc/letsencrypt/live/{{ keycloak.domain_name }}/privkey.pem; # managed by Certbot
-          include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
-          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
-
       }
+  when: not keycloak_tls_certificate.stat.exists
+  notify: Reload Nginx
+
+- name: Configure Keycloak HTTPS nginx site
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/keycloak
+    mode: "0644"
+    content: |
       server {
-          if ($host = {{ keycloak.domain_name }}) {
-              return 301 https://$host$request_uri;
-          } # managed by Certbot
-
-
           listen 80;
           server_name {{ keycloak.domain_name }};
-          return 404; # managed by Certbot
 
+          location /.well-known/acme-challenge/ {
+              root /var/www/html;
+          }
 
-      }      
-  notify: Restart Nginx
+          location / {
+              return 301 https://$host$request_uri;
+          }
+      }
 
-- name: Enable Nginx configuration
-  file:
-    src: "/etc/nginx/sites-available/keycloak"
-    dest: "/etc/nginx/sites-enabled/keycloak"
+      server {
+          listen 443 ssl http2;
+          server_name {{ keycloak.domain_name }};
+
+          ssl_certificate /etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem;
+          ssl_certificate_key /etc/letsencrypt/live/{{ keycloak.domain_name }}/privkey.pem;
+          include /etc/letsencrypt/options-ssl-nginx.conf;
+          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+          location / {
+              proxy_pass http://{{ keycloak_listen_address }}:{{ keycloak_http_port }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto https;
+          }
+      }
+  when: keycloak_tls_certificate.stat.exists
+  notify: Reload Nginx
+
+- name: Enable Keycloak nginx configuration
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/keycloak
+    dest: /etc/nginx/sites-enabled/keycloak
     state: link
-  notify: Restart Nginx
+  notify: Reload Nginx
 
-- name: Obtain SSL certificate using Certbot
-  command: "certbot --nginx -d {{ keycloak.domain_name }} --email {{ keycloak.email_for_ssl }} --agree-tos --redirect --non-interactive"
-  notify: Restart Nginx
+- name: Ensure Nginx is enabled and started for Keycloak
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started
 
-- name: Remove Keycloak archive from /tmp
-  file:
-    path: /tmp/keycloak.tar.gz
-    state: absent
+- name: Apply pending nginx handlers before requesting TLS certificate
+  ansible.builtin.meta: flush_handlers
+  when: not keycloak_tls_certificate.stat.exists
 
+- name: Request Keycloak TLS certificate
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - -w
+      - /var/www/html
+      - -d
+      - "{{ keycloak.domain_name }}"
+      - --email
+      - "{{ keycloak.email_for_ssl }}"
+      - --agree-tos
+      - --non-interactive
+      - --keep-until-expiring
+  when: not keycloak_tls_certificate.stat.exists
+
+- name: Refresh Keycloak TLS certificate status
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem"
+  register: keycloak_tls_certificate
+
+- name: Configure Keycloak HTTPS nginx site after certificate issuance
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/keycloak
+    mode: "0644"
+    content: |
+      server {
+          listen 80;
+          server_name {{ keycloak.domain_name }};
+
+          location /.well-known/acme-challenge/ {
+              root /var/www/html;
+          }
+
+          location / {
+              return 301 https://$host$request_uri;
+          }
+      }
+
+      server {
+          listen 443 ssl http2;
+          server_name {{ keycloak.domain_name }};
+
+          ssl_certificate /etc/letsencrypt/live/{{ keycloak.domain_name }}/fullchain.pem;
+          ssl_certificate_key /etc/letsencrypt/live/{{ keycloak.domain_name }}/privkey.pem;
+          include /etc/letsencrypt/options-ssl-nginx.conf;
+          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+          location / {
+              proxy_pass http://{{ keycloak_listen_address }}:{{ keycloak_http_port }};
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto https;
+          }
+      }
+  when: keycloak_tls_certificate.stat.exists
+  notify: Reload Nginx
+
+- name: Ensure certbot renewal timer is enabled
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started
+
+- name: Apply final nginx handlers
+  ansible.builtin.meta: flush_handlers

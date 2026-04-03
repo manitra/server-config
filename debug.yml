@@ -1,5 +1,0 @@
----
-
-- hosts: keycloak
-  roles:
-    - keycloak

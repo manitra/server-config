@@ -1,0 +1,5 @@
+---
+keycloak_track_latest: true
+keycloak_release_api_url: https://api.github.com/repos/keycloak/keycloak/releases/latest
+keycloak_http_port: 8080
+keycloak_listen_address: 127.0.0.1
