@@ -1,6 +1,6 @@
 - name: Ensure the hostname matches the one specified in inventory
   ansible.builtin.hostname:
-    name: '{{ ansible_hostname }}'
+    name: '{{ inventory_hostname }}'
     use: debian
 
 - name: Set timezone to EAT
