@@ -1,5 +1,16 @@
 ---
 # handlers file for hestiacp
+- name: "reload systemd"
+  become: true
+  systemd:
+    daemon_reload: true
+
+- name: "restart nginx"
+  become: true
+  service:
+    name: nginx
+    state: restarted
+
 - name: "reboot server"
   reboot:
     connect_timeout: 5

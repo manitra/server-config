@@ -1,0 +1,30 @@
+---
+- name: "Collect systemd service facts"
+  become: true
+  service_facts:
+
+- name: "Ensure nginx systemd override directory exists"
+  become: true
+  file:
+    path: /etc/systemd/system/nginx.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: "'nginx.service' in ansible_facts.services"
+
+- name: "Ensure nginx restarts after transient failures"
+  become: true
+  copy:
+    dest: /etc/systemd/system/nginx.service.d/restart-on-failure.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      Restart=on-failure
+      RestartSec=5s
+  when: "'nginx.service' in ansible_facts.services"
+  notify:
+    - reload systemd
+    - restart nginx
