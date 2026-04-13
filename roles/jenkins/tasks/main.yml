@@ -19,6 +19,7 @@
 - name: Install Jenkins prerequisites
   ansible.builtin.apt:
     name:
+      - ansible
       - ca-certificates
       - curl
       - gnupg
