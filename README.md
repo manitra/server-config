@@ -1,5 +1,7 @@
-# server-config
-My ansible playground :)
+# server-config - my ansible playground :)
+
+The entry point is `hourly.yml` which is supposed to be called ... hourly.
+(Thank you Mr Obvious!)
 
 ## Collections
 
