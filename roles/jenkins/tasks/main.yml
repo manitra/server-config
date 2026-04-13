@@ -23,7 +23,7 @@
       - curl
       - gnupg
       - fontconfig
-      - openjdk-17-jre
+      - "{{ jenkins_java_package }}"
       - nginx
       - certbot
       - python3-certbot-nginx
@@ -42,7 +42,7 @@
     url: "{{ jenkins_repo_key_url }}"
     dest: "{{ jenkins_repo_key_path }}"
     mode: '0644'
-    force: false
+    force: true
 
 - name: Configure Jenkins apt repository
   ansible.builtin.apt_repository:
@@ -249,13 +249,15 @@
       }
 
       server {
-          listen 443 ssl;
+          listen 443 ssl http2;
           server_name {{ jenkins_domain_name }};
 
           ssl_certificate /etc/letsencrypt/live/{{ jenkins_domain_name }}/fullchain.pem;
           ssl_certificate_key /etc/letsencrypt/live/{{ jenkins_domain_name }}/privkey.pem;
-          include /etc/letsencrypt/options-ssl-nginx.conf;
-          ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+          ssl_protocols TLSv1.2 TLSv1.3;
+          ssl_session_timeout 1d;
+          ssl_session_cache shared:jenkins_nginx_ssl:10m;
+          ssl_session_tickets off;
 
           client_max_body_size 1g;
 
