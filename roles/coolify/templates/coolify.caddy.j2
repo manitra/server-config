@@ -1,0 +1,4 @@
+{{ coolify_domain }} {
+    encode gzip
+    reverse_proxy {{ coolify_app_bind_address }}:{{ coolify_app_port }}
+}

@@ -1,0 +1,235 @@
+---
+- name: Check Docker engine
+  command: docker --version
+  check_mode: false
+  changed_when: false
+
+- name: Check Docker Compose plugin
+  command: docker compose version
+  check_mode: false
+  changed_when: false
+
+- name: Ensure Coolify directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "9999"
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ coolify_base_dir }}"
+    - "{{ coolify_source_dir }}"
+    - "{{ coolify_base_dir }}/ssh"
+    - "{{ coolify_base_dir }}/ssh/keys"
+    - "{{ coolify_base_dir }}/ssh/mux"
+    - "{{ coolify_base_dir }}/applications"
+    - "{{ coolify_base_dir }}/databases"
+    - "{{ coolify_base_dir }}/services"
+    - "{{ coolify_base_dir }}/backups"
+    - "{{ coolify_base_dir }}/proxy"
+    - "{{ coolify_base_dir }}/proxy/dynamic"
+    - "{{ coolify_base_dir }}/sentinel"
+
+- name: Download Coolify Compose files
+  get_url:
+    url: "{{ coolify_cdn_url }}/{{ item }}"
+    dest: "{{ coolify_source_dir }}/{{ item }}"
+    owner: "9999"
+    group: root
+    mode: "0600"
+  loop:
+    - docker-compose.yml
+    - docker-compose.prod.yml
+    - .env.production
+
+- name: Check Coolify environment file
+  stat:
+    path: "{{ coolify_env_file }}"
+  register: coolify_env_stat
+
+- name: Initialize Coolify environment file
+  copy:
+    src: "{{ coolify_source_dir }}/.env.production"
+    dest: "{{ coolify_env_file }}"
+    remote_src: true
+    force: false
+    owner: "9999"
+    group: root
+    mode: "0600"
+  when: not coolify_env_stat.stat.exists
+
+- name: Merge new Coolify environment defaults
+  shell: |
+    set -euo pipefail
+    tmp_file="$(mktemp {{ coolify_source_dir }}/.env.merge.XXXXXX)"
+    awk -F '=' '!seen[$1]++' "{{ coolify_env_file }}" "{{ coolify_source_dir }}/.env.production" > "$tmp_file"
+
+    if cmp -s "$tmp_file" "{{ coolify_env_file }}"; then
+      rm -f "$tmp_file"
+    else
+      mv "$tmp_file" "{{ coolify_env_file }}"
+      chown 9999:root "{{ coolify_env_file }}"
+      chmod 0600 "{{ coolify_env_file }}"
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: coolify_env_defaults_merge
+  changed_when: "'changed' in coolify_env_defaults_merge.stdout"
+  no_log: true
+
+- name: Ensure Coolify non-secret environment values
+  lineinfile:
+    path: "{{ coolify_env_file }}"
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    create: true
+    owner: "9999"
+    group: root
+    mode: "0600"
+  loop:
+    - key: APP_NAME
+      value: "{{ coolify_app_name }}"
+    - key: REGISTRY_URL
+      value: "{{ coolify_registry_url }}"
+    - key: LATEST_IMAGE
+      value: "{{ coolify_latest_image }}"
+    - key: APP_PORT
+      value: "{{ coolify_app_port }}"
+    - key: SOKETI_PORT
+      value: "{{ coolify_soketi_port }}"
+
+- name: Generate missing Coolify secrets
+  shell: |
+    set -euo pipefail
+    env_file="{{ coolify_env_file }}"
+    changed=0
+
+    ensure_secret() {
+      key="$1"
+      value_command="$2"
+      if ! grep -Eq "^${key}=.+" "$env_file"; then
+        sed -i "/^${key}=/d" "$env_file"
+        printf '%s=%s\n' "$key" "$(eval "$value_command")" >> "$env_file"
+        changed=1
+      fi
+    }
+
+    ensure_secret APP_ID "openssl rand -hex 16"
+    ensure_secret APP_KEY "printf 'base64:' && openssl rand -base64 32"
+    ensure_secret DB_PASSWORD "openssl rand -base64 32"
+    ensure_secret REDIS_PASSWORD "openssl rand -base64 32"
+    ensure_secret PUSHER_APP_ID "openssl rand -hex 32"
+    ensure_secret PUSHER_APP_KEY "openssl rand -hex 32"
+    ensure_secret PUSHER_APP_SECRET "openssl rand -hex 32"
+
+    chown 9999:root "$env_file"
+    chmod 0600 "$env_file"
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: coolify_secret_generation
+  changed_when: "'changed' in coolify_secret_generation.stdout"
+  no_log: true
+
+- name: Deploy Coolify Compose override
+  template:
+    src: docker-compose.custom.yml.j2
+    dest: "{{ coolify_source_dir }}/docker-compose.custom.yml"
+    owner: "9999"
+    group: root
+    mode: "0600"
+
+- name: Ensure Coolify Docker network exists
+  community.docker.docker_network:
+    name: coolify
+    driver: bridge
+    state: present
+
+- name: Ensure root SSH directory exists
+  file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate Coolify local SSH key
+  command:
+    cmd: "ssh-keygen -t ed25519 -a 100 -f {{ coolify_ssh_key_path }} -q -N '' -C coolify"
+    creates: "{{ coolify_ssh_key_path }}"
+
+- name: Set Coolify local SSH key permissions
+  file:
+    path: "{{ coolify_ssh_key_path }}"
+    owner: "9999"
+    group: root
+    mode: "0600"
+
+- name: Read Coolify local SSH public key
+  command: "ssh-keygen -y -f {{ coolify_ssh_key_path }}"
+  check_mode: false
+  register: coolify_local_public_key
+  changed_when: false
+  no_log: true
+
+- name: Authorize Coolify local SSH key
+  authorized_key:
+    user: "{{ coolify_ssh_user }}"
+    key: "{{ coolify_local_public_key.stdout }}"
+    comment: coolify
+    state: present
+  no_log: true
+
+- name: Start Coolify
+  community.docker.docker_compose_v2:
+    project_src: "{{ coolify_source_dir }}"
+    project_name: coolify
+    files:
+      - docker-compose.yml
+      - docker-compose.prod.yml
+      - docker-compose.custom.yml
+    env_files:
+      - .env
+    pull: missing
+    remove_orphans: true
+    wait: true
+    wait_timeout: 180
+    state: present
+
+- name: Ensure Caddy config directory exists
+  file:
+    path: "{{ coolify_caddy_config_dir }}"
+    state: directory
+    mode: "0755"
+  when: coolify_manage_caddy
+
+- name: Add Caddy conf.d import directive
+  lineinfile:
+    path: /etc/caddy/Caddyfile
+    line: "import /etc/caddy/conf.d/*.caddy"
+    insertafter: EOF
+    state: present
+  notify: Validate and reload caddy
+  when: coolify_manage_caddy
+
+- name: Deploy Coolify Caddy vhost config
+  template:
+    src: coolify.caddy.j2
+    dest: "{{ coolify_caddy_config_path }}"
+    mode: "0644"
+  notify: Validate and reload caddy
+  when: coolify_manage_caddy
+
+- name: Wait for Coolify health endpoint
+  uri:
+    url: "http://127.0.0.1:{{ coolify_app_port }}/api/health"
+    status_code: 200
+  check_mode: false
+  register: coolify_health_check
+  retries: 30
+  delay: 5
+  until: coolify_health_check.status == 200

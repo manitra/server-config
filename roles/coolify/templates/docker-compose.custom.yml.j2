@@ -1,0 +1,11 @@
+services:
+  coolify:
+    ports: !override
+      - "{{ coolify_app_bind_address }}:{{ coolify_app_port }}:8080"
+    expose: !override
+      - "8080"
+
+  soketi:
+    ports: !override
+      - "{{ coolify_app_bind_address }}:{{ coolify_soketi_port }}:6001"
+      - "{{ coolify_app_bind_address }}:{{ coolify_soketi_metrics_port }}:6002"

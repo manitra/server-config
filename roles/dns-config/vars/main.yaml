@@ -23,3 +23,5 @@ CNAME:
     value: vps03.manitra.net
   - record: build
     value: vps12.manitra.net
+  - record: coolify
+    value: vps11.manitra.net

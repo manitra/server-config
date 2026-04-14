@@ -1,0 +1,11 @@
+---
+- name: Validate Caddy config
+  command: caddy validate --config /etc/caddy/Caddyfile
+  changed_when: false
+  listen: Validate and reload caddy
+
+- name: Reload Caddy
+  systemd:
+    name: caddy
+    state: reloaded
+  listen: Validate and reload caddy
