@@ -1,4 +1,11 @@
 {{ coolify_domain }} {
     encode gzip
+
+    @realtime path /app/* /apps/*
+    reverse_proxy @realtime {{ coolify_app_bind_address }}:{{ coolify_soketi_port }}
+
+    @terminal path /terminal/ws*
+    reverse_proxy @terminal {{ coolify_app_bind_address }}:{{ coolify_soketi_metrics_port }}
+
     reverse_proxy {{ coolify_app_bind_address }}:{{ coolify_app_port }}
 }

@@ -1,5 +1,5 @@
 ---
-
+    
 - hosts: all
   roles:
     - maintain
@@ -23,6 +23,10 @@
 - hosts: jenkins
   roles:
     - jenkins
+
+- hosts: coolify
+  roles:
+    - coolify
 
 - hosts: imgproc
   roles:
