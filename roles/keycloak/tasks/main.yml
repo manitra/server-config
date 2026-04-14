@@ -1,7 +1,4 @@
 ---
-- name: Load config file
-  ansible.builtin.include_vars: .config.yml
-
 - name: Ensure Keycloak settings are configured
   ansible.builtin.assert:
     that:
@@ -17,7 +14,7 @@
       - keycloak.admin_password is defined
       - keycloak.domain_name is defined
       - keycloak.email_for_ssl is defined
-    fail_msg: Set the required Keycloak variables in .config.yml before running this role.
+    fail_msg: Set the required Keycloak variables in group_vars/all/vault.yml before running this role.
 
 - name: Install required packages
   ansible.builtin.apt:

@@ -1,7 +1,4 @@
 ---
-- name: Load config file
-  include_vars: .config.yml
-
 - name: A DNS records
   community.general.cloudflare_dns:
     zone: "manitra.net"

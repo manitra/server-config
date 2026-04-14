@@ -1,7 +1,4 @@
 
-- name: Load config file
-  include_vars: .config.yml
-
 - name: Add microsoft repository key
   ansible.builtin.apt_key:
     url: https://packages.microsoft.com/keys/microsoft.asc

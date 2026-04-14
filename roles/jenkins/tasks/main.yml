@@ -1,7 +1,4 @@
 ---
-- name: Load config file
-  include_vars: .config.yml
-
 - name: Ensure Jenkins admin secrets are configured
   ansible.builtin.assert:
     that:
@@ -14,7 +11,7 @@
       - jenkins_domain_name | length > 0
       - jenkins_email_for_ssl is defined
       - jenkins_email_for_ssl | length > 0
-    fail_msg: Set Jenkins admin credentials in .config.yml and Jenkins domain/email settings in group_vars/jenkins.yml before running this role.
+    fail_msg: Set Jenkins admin credentials in group_vars/all/vault.yml and Jenkins domain/email settings in group_vars/jenkins.yml before running this role.
 
 - name: Install Jenkins prerequisites
   ansible.builtin.apt:
