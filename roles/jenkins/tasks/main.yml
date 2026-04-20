@@ -252,6 +252,7 @@
     - jenkins_plugin_updates_enabled | bool
     - jenkins_plugin_restart_required | default(false) | bool
     - jenkins_plugin_restart_mode == 'safe'
+  no_log: true
 
 - name: Schedule Jenkins safe restart after plugin updates
   ansible.builtin.uri:
@@ -260,7 +261,15 @@
     url_username: "{{ jenkins.admin_user }}"
     url_password: "{{ jenkins.admin_password }}"
     force_basic_auth: true
-    headers: "{{ {jenkins_plugin_safe_restart_crumb.json.crumbRequestField: jenkins_plugin_safe_restart_crumb.json.crumb} }}"
+    headers: >-
+      {{
+        {jenkins_plugin_safe_restart_crumb.json.crumbRequestField: jenkins_plugin_safe_restart_crumb.json.crumb}
+        | combine(
+          {'Cookie': jenkins_plugin_safe_restart_crumb.cookies_string}
+          if (jenkins_plugin_safe_restart_crumb.cookies_string | default('') | length > 0)
+          else {}
+        )
+      }}
     status_code:
       - 200
       - 302
@@ -271,6 +280,7 @@
     - jenkins_plugin_updates_enabled | bool
     - jenkins_plugin_restart_required | default(false) | bool
     - jenkins_plugin_restart_mode == 'safe'
+  no_log: true
 
 - name: Apply immediate Jenkins plugin update restart
   ansible.builtin.systemd:
