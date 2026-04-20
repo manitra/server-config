@@ -24,6 +24,10 @@
   roles:
     - jenkins
 
+- hosts: smtp_relay
+  roles:
+    - smtp-relay
+
 - hosts: coolify
   roles:
     - coolify

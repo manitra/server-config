@@ -1,0 +1,14 @@
+---
+relay_enabled: false
+relay_postfix_packages:
+  - postfix
+  - postfix-pcre
+  - sasl2-bin
+  - libsasl2-modules
+  - fail2ban
+  - ufw
+
+relay_sasl_config_dir: /etc/postfix/sasl
+relay_sasl_config_file: /etc/postfix/sasl/smtpd.conf
+relay_allowed_senders_file: /etc/postfix/allowed_senders.pcre
+relay_password_salt: "{{ relay_smtp_user | regex_replace('[^A-Za-z0-9./]', '') }}"

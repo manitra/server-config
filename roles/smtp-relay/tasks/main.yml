@@ -1,0 +1,224 @@
+---
+- name: Validate SMTP relay configuration
+  ansible.builtin.assert:
+    that:
+      - relay_enabled | bool
+      - relay_hostname is defined
+      - relay_hostname | length > 0
+      - relay_tls_cert is defined
+      - relay_tls_cert | length > 0
+      - relay_tls_key is defined
+      - relay_tls_key | length > 0
+      - relay_allowed_client_ip is defined
+      - relay_allowed_client_ip | length > 0
+      - relay_allowed_sender_regex is defined
+      - relay_allowed_sender_regex | length > 0
+      - relay_smtp_user is defined
+      - relay_smtp_user | length > 0
+      - relay_smtp_password is defined
+      - relay_smtp_password | length > 0
+    fail_msg: Configure the relay variables, including vault_paositra_relay_password, before running this role.
+
+- name: Preseed Postfix mailer type
+  ansible.builtin.debconf:
+    name: postfix
+    question: postfix/main_mailer_type
+    value: Internet Site
+    vtype: select
+
+- name: Preseed Postfix mailname
+  ansible.builtin.debconf:
+    name: postfix
+    question: postfix/mailname
+    value: "{{ relay_hostname }}"
+    vtype: string
+
+- name: Install SMTP relay packages
+  ansible.builtin.apt:
+    name: "{{ relay_postfix_packages }}"
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Ensure Postfix can query saslauthd
+  ansible.builtin.user:
+    name: postfix
+    groups: sasl
+    append: true
+
+- name: Ensure SMTP relay auth user exists
+  ansible.builtin.user:
+    name: "{{ relay_smtp_user }}"
+    state: present
+    system: true
+    create_home: true
+    home: "/home/{{ relay_smtp_user }}"
+    shell: /usr/sbin/nologin
+    password: "{{ relay_smtp_password | password_hash('sha512', relay_password_salt) }}"
+    update_password: always
+  no_log: true
+
+- name: Ensure Postfix SASL config directory exists
+  ansible.builtin.file:
+    path: "{{ relay_sasl_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure Postfix SASL to use saslauthd
+  ansible.builtin.copy:
+    dest: "{{ relay_sasl_config_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      pwcheck_method: saslauthd
+      mech_list: PLAIN LOGIN
+  notify: Restart Postfix
+
+- name: Configure saslauthd shadow backend
+  ansible.builtin.template:
+    src: saslauthd.default.j2
+    dest: /etc/default/saslauthd
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart saslauthd
+
+- name: Configure allowed envelope senders
+  ansible.builtin.template:
+    src: allowed_senders.pcre.j2
+    dest: "{{ relay_allowed_senders_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Postfix
+
+- name: Configure Postfix main.cf relay settings
+  ansible.builtin.lineinfile:
+    path: /etc/postfix/main.cf
+    regexp: "^{{ item.key | regex_escape }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - key: compatibility_level
+      value: '3.6'
+    - key: myhostname
+      value: "{{ relay_hostname }}"
+    - key: myorigin
+      value: $myhostname
+    - key: mydestination
+      value: localhost
+    - key: mynetworks
+      value: 127.0.0.0/8 [::1]/128
+    - key: inet_interfaces
+      value: all
+    - key: inet_protocols
+      value: all
+    - key: append_dot_mydomain
+      value: 'no'
+    - key: biff
+      value: 'no'
+    - key: readme_directory
+      value: 'no'
+    - key: smtpd_banner
+      value: $myhostname ESMTP relay
+    - key: alias_maps
+      value: hash:/etc/aliases
+    - key: alias_database
+      value: hash:/etc/aliases
+    - key: smtpd_tls_cert_file
+      value: "{{ relay_tls_cert }}"
+    - key: smtpd_tls_key_file
+      value: "{{ relay_tls_key }}"
+    - key: smtpd_tls_security_level
+      value: may
+    - key: smtpd_tls_auth_only
+      value: 'yes'
+    - key: smtp_tls_security_level
+      value: may
+    - key: smtp_tls_loglevel
+      value: '1'
+    - key: smtpd_sasl_auth_enable
+      value: 'yes'
+    - key: smtpd_sasl_type
+      value: cyrus
+    - key: smtpd_sasl_path
+      value: smtpd
+    - key: cyrus_sasl_config_path
+      value: "{{ relay_sasl_config_dir }}"
+    - key: smtpd_sasl_security_options
+      value: noanonymous
+    - key: broken_sasl_auth_clients
+      value: 'yes'
+    - key: smtpd_helo_required
+      value: 'yes'
+    - key: disable_vrfy_command
+      value: 'yes'
+    - key: strict_rfc821_envelopes
+      value: 'yes'
+    - key: smtpd_relay_restrictions
+      value: permit_sasl_authenticated,reject_unauth_destination
+    - key: smtpd_sender_restrictions
+      value: "reject_non_fqdn_sender,check_sender_access pcre:{{ relay_allowed_senders_file }}"
+    - key: relay_submission_sender_restrictions
+      value: "reject_non_fqdn_sender, check_sender_access pcre:{{ relay_allowed_senders_file }}"
+    - key: relay_submission_recipient_restrictions
+      value: permit_sasl_authenticated, reject
+    - key: relay_submission_relay_restrictions
+      value: permit_sasl_authenticated, reject
+  notify: Restart Postfix
+
+- name: Configure Postfix master.cf with submission listener only
+  ansible.builtin.template:
+    src: master.cf.j2
+    dest: /etc/postfix/master.cf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Postfix
+
+- name: Configure Fail2Ban postfix submission filter
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/filter.d/postfix-submission.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Definition]
+      failregex = ^.*postfix/(?:submission/)?smtpd\[[0-9]+\]: warning: [^\[]+\[<HOST>\]: SASL (?:LOGIN|PLAIN) authentication failed: .*$
+                  ^.*postfix/(?:submission/)?smtpd\[[0-9]+\]: warning: [^\[]+\[<HOST>\]: SASL authentication failure: .*$
+      ignoreregex =
+  notify: Restart fail2ban
+
+- name: Configure Fail2Ban postfix submission jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/postfix-submission.local
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [postfix-submission]
+      enabled = true
+      filter = postfix-submission
+      backend = polling
+      logpath = /var/log/mail.log
+      port = 587,submission
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+  notify: Restart fail2ban
+
+- name: Ensure SMTP relay services are enabled and running
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - saslauthd
+    - postfix
+    - fail2ban

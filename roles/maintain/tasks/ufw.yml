@@ -22,7 +22,7 @@
         direction: outgoing
         policy: allow
 
-    - name: Allow SSH, HTTP, HTTPS and HestiaCP only
+    - name: Allow base SSH, HTTP, HTTPS and HestiaCP ports
       ufw:
         rule: allow
         port: "{{ item }}"
@@ -32,6 +32,16 @@
          - '80'
          - '443'
          - '8083'
+
+    - name: Allow host-specific extra firewall rules
+      ufw:
+        rule: "{{ item.rule | default('allow') }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        from_ip: "{{ item.from_ip | default('any') }}"
+        to_ip: "{{ item.to_ip | default('any') }}"
+        comment: "{{ item.comment | default(omit) }}"
+      loop: "{{ ufw_extra_allow_rules | default([]) }}"
 
     - name: Enable UFW
       ufw:
