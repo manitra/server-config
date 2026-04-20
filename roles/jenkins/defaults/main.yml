@@ -9,3 +9,4 @@ jenkins_home: /var/lib/jenkins
 jenkins_plugin_updates_enabled: true
 jenkins_plugin_update_timeout: 300
 jenkins_plugin_update_metadata_expiration: 3600
+jenkins_plugin_restart_mode: safe

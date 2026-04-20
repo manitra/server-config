@@ -13,6 +13,12 @@
       - jenkins_email_for_ssl | length > 0
     fail_msg: Set Jenkins admin credentials in group_vars/all/vault.yml and Jenkins domain/email settings in group_vars/jenkins.yml before running this role.
 
+- name: Validate Jenkins plugin restart mode
+  ansible.builtin.assert:
+    that:
+      - jenkins_plugin_restart_mode in ['safe', 'immediate', 'none']
+    fail_msg: jenkins_plugin_restart_mode must be one of safe, immediate, or none.
+
 - name: Install Jenkins prerequisites
   ansible.builtin.apt:
     name:
@@ -166,7 +172,15 @@
       - '*.jpi'
       - '*.hpi'
     file_type: file
+    get_checksum: true
   register: jenkins_installed_plugin_archives
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_directory.stat.isdir | default(false)
+
+- name: Record Jenkins plugin archive checksums before updates
+  ansible.builtin.set_fact:
+    jenkins_plugin_archive_checksums_before_update: "{{ dict(jenkins_installed_plugin_archives.files | map(attribute='path') | zip(jenkins_installed_plugin_archives.files | map(attribute='checksum'))) }}"
   when:
     - jenkins_plugin_updates_enabled | bool
     - jenkins_plugin_directory.stat.isdir | default(false)
@@ -189,25 +203,86 @@
     force_basic_auth: true
     timeout: "{{ jenkins_plugin_update_timeout }}"
     updates_expiration: "{{ jenkins_plugin_update_metadata_expiration }}"
+    with_dependencies: true
   loop: "{{ jenkins_installed_plugins | default([]) }}"
   loop_control:
     label: "{{ item }}"
-  register: jenkins_plugin_update_results
   no_log: true
   when:
     - jenkins_plugin_updates_enabled | bool
     - jenkins_installed_plugins | default([]) | length > 0
-  notify:
-    - Restart Jenkins
 
-- name: Apply Jenkins plugin update restart
-  ansible.builtin.meta: flush_handlers
+- name: Find Jenkins plugin archives after updates
+  ansible.builtin.find:
+    paths: "{{ jenkins_home }}/plugins"
+    patterns:
+      - '*.jpi'
+      - '*.hpi'
+    file_type: file
+    get_checksum: true
+  register: jenkins_plugin_archives_after_update
   when:
     - jenkins_plugin_updates_enabled | bool
-    - jenkins_plugin_update_results is defined
-    - jenkins_plugin_update_results.changed
+    - jenkins_plugin_directory.stat.isdir | default(false)
 
-- name: Wait for Jenkins after plugin updates
+- name: Record Jenkins plugin archive checksums after updates
+  ansible.builtin.set_fact:
+    jenkins_plugin_archive_checksums_after_update: "{{ dict(jenkins_plugin_archives_after_update.files | map(attribute='path') | zip(jenkins_plugin_archives_after_update.files | map(attribute='checksum'))) }}"
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_archives_after_update is defined
+
+- name: Check whether Jenkins plugin archives changed
+  ansible.builtin.set_fact:
+    jenkins_plugin_restart_required: "{{ (jenkins_plugin_archive_checksums_before_update | default({})) != (jenkins_plugin_archive_checksums_after_update | default({})) }}"
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_archives_after_update is defined
+
+- name: Get Jenkins crumb for safe plugin restart
+  ansible.builtin.uri:
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/crumbIssuer/api/json"
+    url_username: "{{ jenkins.admin_user }}"
+    url_password: "{{ jenkins.admin_password }}"
+    force_basic_auth: true
+    timeout: 10
+    return_content: true
+  register: jenkins_plugin_safe_restart_crumb
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_restart_required | default(false) | bool
+    - jenkins_plugin_restart_mode == 'safe'
+
+- name: Schedule Jenkins safe restart after plugin updates
+  ansible.builtin.uri:
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/safeRestart"
+    method: POST
+    url_username: "{{ jenkins.admin_user }}"
+    url_password: "{{ jenkins.admin_password }}"
+    force_basic_auth: true
+    headers: "{{ {jenkins_plugin_safe_restart_crumb.json.crumbRequestField: jenkins_plugin_safe_restart_crumb.json.crumb} }}"
+    status_code:
+      - 200
+      - 302
+      - 503
+    timeout: 10
+  changed_when: true
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_restart_required | default(false) | bool
+    - jenkins_plugin_restart_mode == 'safe'
+
+- name: Apply immediate Jenkins plugin update restart
+  ansible.builtin.systemd:
+    name: jenkins
+    enabled: yes
+    state: restarted
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_restart_required | default(false) | bool
+    - jenkins_plugin_restart_mode == 'immediate'
+
+- name: Wait for Jenkins after immediate plugin restart
   ansible.builtin.uri:
     url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/login"
     status_code:
@@ -220,8 +295,8 @@
   until: jenkins_http_ready_after_plugin_updates.status in [200, 403]
   when:
     - jenkins_plugin_updates_enabled | bool
-    - jenkins_plugin_update_results is defined
-    - jenkins_plugin_update_results.changed
+    - jenkins_plugin_restart_required | default(false) | bool
+    - jenkins_plugin_restart_mode == 'immediate'
 
 - name: Ensure ACME webroot exists
   ansible.builtin.file:
