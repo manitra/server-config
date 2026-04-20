@@ -7,6 +7,8 @@ A:
     value: 49.13.231.102
   - record: vps12
     value: 23.88.51.61
+  - record: vps13
+    value: 13.247.181.158
 
 AAAA:
   - record: vps11
