@@ -6,3 +6,6 @@ jenkins_java_package: "{{ 'openjdk-21-jre' if (ansible_distribution == 'Ubuntu' 
 jenkins_http_port: 8080
 jenkins_listen_address: 127.0.0.1
 jenkins_home: /var/lib/jenkins
+jenkins_plugin_updates_enabled: true
+jenkins_plugin_update_timeout: 300
+jenkins_plugin_update_metadata_expiration: 3600

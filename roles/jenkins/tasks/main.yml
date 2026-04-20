@@ -141,6 +141,88 @@
     delay: 5
     timeout: 300
 
+- name: Wait for Jenkins HTTP endpoint to be ready
+  ansible.builtin.uri:
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/login"
+    status_code:
+      - 200
+      - 403
+    timeout: 10
+  register: jenkins_http_ready
+  retries: 60
+  delay: 5
+  until: jenkins_http_ready.status in [200, 403]
+
+- name: Check whether Jenkins plugin directory exists
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/plugins"
+  register: jenkins_plugin_directory
+  when: jenkins_plugin_updates_enabled | bool
+
+- name: Find installed Jenkins plugin archives
+  ansible.builtin.find:
+    paths: "{{ jenkins_home }}/plugins"
+    patterns:
+      - '*.jpi'
+      - '*.hpi'
+    file_type: file
+  register: jenkins_installed_plugin_archives
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_directory.stat.isdir | default(false)
+
+- name: Build installed Jenkins plugin list
+  ansible.builtin.set_fact:
+    jenkins_installed_plugins: "{{ jenkins_installed_plugin_archives.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.(jpi|hpi)$', '') | unique | sort }}"
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_directory.stat.isdir | default(false)
+
+- name: Keep installed Jenkins plugins up to date
+  community.general.jenkins_plugin:
+    name: "{{ item }}"
+    state: latest
+    jenkins_home: "{{ jenkins_home }}"
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}"
+    url_username: "{{ jenkins.admin_user }}"
+    url_password: "{{ jenkins.admin_password }}"
+    force_basic_auth: true
+    timeout: "{{ jenkins_plugin_update_timeout }}"
+    updates_expiration: "{{ jenkins_plugin_update_metadata_expiration }}"
+  loop: "{{ jenkins_installed_plugins | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: jenkins_plugin_update_results
+  no_log: true
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_installed_plugins | default([]) | length > 0
+  notify:
+    - Restart Jenkins
+
+- name: Apply Jenkins plugin update restart
+  ansible.builtin.meta: flush_handlers
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_update_results is defined
+    - jenkins_plugin_update_results.changed
+
+- name: Wait for Jenkins after plugin updates
+  ansible.builtin.uri:
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/login"
+    status_code:
+      - 200
+      - 403
+    timeout: 10
+  register: jenkins_http_ready_after_plugin_updates
+  retries: 60
+  delay: 5
+  until: jenkins_http_ready_after_plugin_updates.status in [200, 403]
+  when:
+    - jenkins_plugin_updates_enabled | bool
+    - jenkins_plugin_update_results is defined
+    - jenkins_plugin_update_results.changed
+
 - name: Ensure ACME webroot exists
   ansible.builtin.file:
     path: /var/www/html
