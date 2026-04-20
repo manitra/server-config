@@ -196,8 +196,6 @@
       - .env
     pull: missing
     remove_orphans: true
-    wait: true
-    wait_timeout: 180
     state: present
 
 - name: Ensure Caddy config directory exists
