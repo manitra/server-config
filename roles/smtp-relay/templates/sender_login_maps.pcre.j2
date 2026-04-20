@@ -1,0 +1,4 @@
+# Managed by Ansible.
+{% for user in relay_users %}
+{{ user.allowed_sender_regex }} {{ user.name }}
+{% endfor %}

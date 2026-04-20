@@ -11,4 +11,6 @@ Install the required Ansible collections before running the playbooks:
 
 ## vps12 SMTP relay
 
-`vps12.manitra.net` is also in the `smtp_relay` group. Before applying `hourly.yml`, set `vault_paositra_relay_password` in `group_vars/all/vault.yml` to the same SMTP secret configured on `prea`; the placeholder is intentionally empty so the relay role fails safely until the real secret is vaulted.
+`vps12.manitra.net` is also in the `smtp_relay` group. Relay accounts are defined in `group_vars/smtp_relay.yml` under `relay_users`; each user has its own vaulted password, allowed sender regex, and allowed client IP list.
+
+Before applying `hourly.yml`, make sure every relay user password referenced from `group_vars/smtp_relay.yml` exists in `group_vars/all/vault.yml`, under `smtp_relay.users`. The role fails safely when a relay password is empty or missing.

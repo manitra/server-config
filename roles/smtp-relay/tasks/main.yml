@@ -9,15 +9,28 @@
       - relay_tls_cert | length > 0
       - relay_tls_key is defined
       - relay_tls_key | length > 0
-      - relay_allowed_client_ip is defined
-      - relay_allowed_client_ip | length > 0
-      - relay_allowed_sender_regex is defined
-      - relay_allowed_sender_regex | length > 0
-      - relay_smtp_user is defined
-      - relay_smtp_user | length > 0
-      - relay_smtp_password is defined
-      - relay_smtp_password | length > 0
-    fail_msg: Configure the relay variables, including vault_paositra_relay_password, before running this role.
+      - relay_users is defined
+      - relay_users | type_debug == 'list'
+      - relay_users | length > 0
+    fail_msg: Configure relay_users, including each user's vaulted password, before running this role.
+
+- name: Validate SMTP relay users
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | length > 0
+      - item.password is defined
+      - item.password | length > 0
+      - item.allowed_sender_regex is defined
+      - item.allowed_sender_regex | length > 0
+      - item.allowed_client_ips is defined
+      - item.allowed_client_ips | type_debug == 'list'
+      - item.allowed_client_ips | length > 0
+    fail_msg: Configure each relay user with name, password, allowed_sender_regex, and allowed_client_ips.
+  loop: "{{ relay_users }}"
+  loop_control:
+    label: "{{ item.name | default('unnamed relay user') }}"
+  no_log: true
 
 - name: Preseed Postfix mailer type
   ansible.builtin.debconf:
@@ -46,16 +59,19 @@
     groups: sasl
     append: true
 
-- name: Ensure SMTP relay auth user exists
+- name: Ensure SMTP relay auth users exist
   ansible.builtin.user:
-    name: "{{ relay_smtp_user }}"
+    name: "{{ item.name }}"
     state: present
     system: true
     create_home: true
-    home: "/home/{{ relay_smtp_user }}"
-    shell: /usr/sbin/nologin
-    password: "{{ relay_smtp_password | password_hash('sha512', relay_password_salt) }}"
+    home: "{{ item.home | default('/home/' ~ item.name) }}"
+    shell: "{{ item.shell | default('/usr/sbin/nologin') }}"
+    password: "{{ item.password | password_hash('sha512', item.password_salt | default(item.name | regex_replace('[^A-Za-z0-9./]', ''), true)) }}"
     update_password: always
+  loop: "{{ relay_users }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
 
 - name: Ensure Postfix SASL config directory exists
@@ -86,13 +102,48 @@
     mode: '0644'
   notify: Restart saslauthd
 
-- name: Configure allowed envelope senders
+- name: Ensure per-user client access map directory exists
+  ansible.builtin.file:
+    path: "{{ relay_client_access_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure sender-to-login ownership map
   ansible.builtin.template:
-    src: allowed_senders.pcre.j2
-    dest: "{{ relay_allowed_senders_file }}"
+    src: sender_login_maps.pcre.j2
+    dest: "{{ relay_sender_login_maps_file }}"
     owner: root
     group: root
     mode: '0644'
+  notify: Restart Postfix
+
+- name: Configure SASL user access map
+  ansible.builtin.template:
+    src: sasl_access.pcre.j2
+    dest: "{{ relay_sasl_access_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Postfix
+
+- name: Configure per-user client IP access maps
+  ansible.builtin.template:
+    src: client_access.cidr.j2
+    dest: "{{ relay_client_access_dir }}/{{ item.name | regex_replace('[^A-Za-z0-9_.-]', '_') }}.cidr"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ relay_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  notify: Restart Postfix
+
+- name: Remove obsolete global sender access map
+  ansible.builtin.file:
+    path: /etc/postfix/allowed_senders.pcre
+    state: absent
   notify: Restart Postfix
 
 - name: Configure Postfix main.cf relay settings
@@ -153,6 +204,8 @@
       value: "{{ relay_sasl_config_dir }}"
     - key: smtpd_sasl_security_options
       value: noanonymous
+    - key: smtpd_sender_login_maps
+      value: "pcre:{{ relay_sender_login_maps_file }}"
     - key: broken_sasl_auth_clients
       value: 'yes'
     - key: smtpd_helo_required
@@ -164,13 +217,29 @@
     - key: smtpd_relay_restrictions
       value: permit_sasl_authenticated,reject_unauth_destination
     - key: smtpd_sender_restrictions
-      value: "reject_non_fqdn_sender,check_sender_access pcre:{{ relay_allowed_senders_file }}"
+      value: reject_non_fqdn_sender,reject_authenticated_sender_login_mismatch
+    - key: smtpd_restriction_classes
+      value: "{% for user in relay_users %}relay_{{ user.name | regex_replace('[^A-Za-z0-9]', '_') }}_client_access{% if not loop.last %}, {% endif %}{% endfor %}"
     - key: relay_submission_sender_restrictions
-      value: "reject_non_fqdn_sender, check_sender_access pcre:{{ relay_allowed_senders_file }}"
+      value: reject_non_fqdn_sender,reject_authenticated_sender_login_mismatch
     - key: relay_submission_recipient_restrictions
       value: permit_sasl_authenticated, reject
     - key: relay_submission_relay_restrictions
-      value: permit_sasl_authenticated, reject
+      value: "check_sasl_access pcre:{{ relay_sasl_access_file }}, permit_sasl_authenticated, reject"
+  notify: Restart Postfix
+
+- name: Configure Postfix per-user client restriction classes
+  ansible.builtin.blockinfile:
+    path: /etc/postfix/main.cf
+    marker: "# {mark} ANSIBLE MANAGED SMTP RELAY USER RESTRICTIONS"
+    block: |
+      {% for user in relay_users %}
+      relay_{{ user.name | regex_replace('[^A-Za-z0-9]', '_') }}_client_access = check_client_access cidr:{{ relay_client_access_dir }}/{{ user.name | regex_replace('[^A-Za-z0-9_.-]', '_') }}.cidr, reject
+      {% endfor %}
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
   notify: Restart Postfix
 
 - name: Configure Postfix master.cf with submission listener only

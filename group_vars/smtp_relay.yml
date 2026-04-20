@@ -3,13 +3,27 @@ relay_enabled: true
 relay_hostname: build.manitra.net
 relay_tls_cert: /etc/letsencrypt/live/build.manitra.net/fullchain.pem
 relay_tls_key: /etc/letsencrypt/live/build.manitra.net/privkey.pem
-relay_allowed_client_ip: 13.247.181.158
-relay_allowed_sender_regex: '/^[^@]+@paositrafinances\.mg$/'
-relay_smtp_user: paositra-relay
-relay_smtp_password: "{{ vault_paositra_relay_password }}"
+
+relay_users:
+  - name: paositra-relay
+    password: "{{ smtp_relay.users.paositra }}"
+    allowed_sender_regex: '/^[^@]+@paositrafinances\.mg$/'
+    allowed_client_ips:
+      - 13.247.181.158
+  - name: build-relay
+    password: "{{ smtp_relay.users.build | default('') }}"
+    allowed_sender_regex: '/^[^@]+@manitra\.net$/'
+    allowed_client_ips:
+      - 127.0.0.1
+      - ::1
+      - 23.88.51.61
 
 ufw_extra_allow_rules:
   - port: '587'
     proto: tcp
-    from_ip: "{{ relay_allowed_client_ip }}"
-    comment: prea relay submission
+    from_ip: 13.247.181.158
+    comment: paositra-relay submission
+  - port: '587'
+    proto: tcp
+    from_ip: 23.88.51.61
+    comment: build submission

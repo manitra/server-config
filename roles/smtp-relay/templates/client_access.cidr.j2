@@ -1,0 +1,6 @@
+# Managed by Ansible.
+{% for client_ip in item.allowed_client_ips %}
+{{ client_ip }} OK
+{% endfor %}
+0.0.0.0/0 REJECT SMTP user {{ item.name }} is not permitted from this client IP
+::/0 REJECT SMTP user {{ item.name }} is not permitted from this client IP

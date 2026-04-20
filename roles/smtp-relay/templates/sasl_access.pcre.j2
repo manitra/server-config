@@ -1,0 +1,5 @@
+# Managed by Ansible.
+{% for user in relay_users %}
+/^{{ user.name | regex_escape }}$/ relay_{{ user.name | regex_replace('[^A-Za-z0-9]', '_') }}_client_access
+{% endfor %}
+/.*/ REJECT SMTP user not permitted on this relay

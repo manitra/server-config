@@ -10,11 +10,11 @@ A:
   - record: vps13
     value: 13.247.181.158
 
-AAAA:
-  - record: vps11
-    value: "2a01:4f8:1c19:e2eb::1"
-  - record: vps12
-    value: "2a01:4f8:1c19:2db::1"
+AAAA: []
+#  - record: vps11
+#    value: "2a01:4f8:1c19:e2eb::1"
+#  - record: vps12
+#    value: "2a01:4f8:1c19:2db::1"
 
 CNAME:
   - record: '@'

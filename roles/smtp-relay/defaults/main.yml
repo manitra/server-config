@@ -10,5 +10,8 @@ relay_postfix_packages:
 
 relay_sasl_config_dir: /etc/postfix/sasl
 relay_sasl_config_file: /etc/postfix/sasl/smtpd.conf
-relay_allowed_senders_file: /etc/postfix/allowed_senders.pcre
-relay_password_salt: "{{ relay_smtp_user | regex_replace('[^A-Za-z0-9./]', '') }}"
+relay_sender_login_maps_file: /etc/postfix/sender_login_maps.pcre
+relay_sasl_access_file: /etc/postfix/sasl_access.pcre
+relay_client_access_dir: /etc/postfix/relay-client-access
+
+relay_users: []
