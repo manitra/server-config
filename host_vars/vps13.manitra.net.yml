@@ -1,0 +1,8 @@
+---
+hestia_fail2ban_ignore_ips:
+  - name: UGD
+    ip: 102.16.56.58
+  - name: Paositrafi
+    ip: 102.16.234.177
+hestia_fail2ban_ignore_legacy_files:
+  - /etc/fail2ban/jail.d/98-whitelist-102-16-234-177.local

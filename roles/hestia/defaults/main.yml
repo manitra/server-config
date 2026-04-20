@@ -31,3 +31,7 @@ hestia_install_flags:
   api: 'yes'
   port: '8083'
   lang: 'en'
+
+hestia_fail2ban_ignore_file: /etc/fail2ban/jail.d/98-trusted-client-ips.local
+hestia_fail2ban_ignore_ips: []
+hestia_fail2ban_ignore_legacy_files: []
