@@ -44,6 +44,9 @@
 - name: "Apply nginx restart guard"
   import_tasks: nginx-guard.yml
 
+- name: "Configure mail policy"
+  import_tasks: mail-policy.yml
+
 - name: "Configure Fail2Ban trusted client IPs"
   become: true
   ansible.builtin.copy:

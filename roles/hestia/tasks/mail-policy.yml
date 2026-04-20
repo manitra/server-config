@@ -1,0 +1,54 @@
+---
+- name: "Check whether Hestia Exim template exists"
+  become: true
+  ansible.builtin.stat:
+    path: /etc/exim4/exim4.conf.template
+  register: hestia_exim_template
+
+- name: "Set Hestia Exim high-spam SMTP reject score"
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/exim4/exim4.conf.template
+    regexp: '^SPAM_REJECT_SCORE\s*='
+    line: "SPAM_REJECT_SCORE = {{ (hestia_spam_reject_score | float * 10) | int }}"
+  when: hestia_exim_template.stat.exists
+  notify: "rebuild and restart exim4"
+
+- name: "Set Hestia Exim message size limit"
+  become: true
+  ansible.builtin.lineinfile:
+    path: /etc/exim4/exim4.conf.template
+    regexp: '^message_size_limit\s*='
+    line: "message_size_limit = {{ hestia_mail_message_size_limit }}"
+    insertafter: '^disable_ipv6\s*='
+  when: hestia_exim_template.stat.exists
+  notify: "rebuild and restart exim4"
+
+- name: "Install Hestia spam-folder cleanup script"
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ hestia_spam_cleanup_script }}"
+    owner: root
+    group: root
+    mode: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      retention_days="${1:-{{ hestia_spam_cleanup_retention_days }}}"
+      retention_minutes=$((retention_days * 1440))
+
+      find /home -xdev -type d -name .Spam -print 2>/dev/null | while IFS= read -r spam_dir; do
+          find "$spam_dir/cur" "$spam_dir/new" -xdev -type f -mmin +"$retention_minutes" -delete 2>/dev/null || true
+      done
+
+- name: "Schedule Hestia spam-folder cleanup"
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ hestia_spam_cleanup_cron_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Managed by Ansible.
+      {{ hestia_spam_cleanup_minute }} {{ hestia_spam_cleanup_hour }} * * * root {{ hestia_spam_cleanup_script }} {{ hestia_spam_cleanup_retention_days }}

@@ -35,3 +35,14 @@ hestia_install_flags:
 hestia_fail2ban_ignore_file: /etc/fail2ban/jail.d/98-trusted-client-ips.local
 hestia_fail2ban_ignore_ips: []
 hestia_fail2ban_ignore_legacy_files: []
+
+# Hestia Exim uses SpamAssassin integer scores scaled by 10.
+# 20.0 in SpamAssassin terms becomes SPAM_REJECT_SCORE = 200.
+hestia_spam_reject_score: 20.0
+hestia_mail_message_size_limit: 50M
+
+hestia_spam_cleanup_retention_days: 7
+hestia_spam_cleanup_script: /usr/local/sbin/hestia-clean-spam-maildirs
+hestia_spam_cleanup_cron_file: /etc/cron.d/hestia-clean-spam-maildirs
+hestia_spam_cleanup_hour: '3'
+hestia_spam_cleanup_minute: '23'

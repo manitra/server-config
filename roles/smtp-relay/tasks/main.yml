@@ -178,6 +178,8 @@
       value: 'no'
     - key: smtpd_banner
       value: $myhostname ESMTP relay
+    - key: message_size_limit
+      value: "{{ relay_message_size_limit }}"
     - key: alias_maps
       value: hash:/etc/aliases
     - key: alias_database
