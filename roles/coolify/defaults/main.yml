@@ -18,5 +18,6 @@ coolify_manage_caddy: true
 coolify_caddy_config_dir: /etc/caddy/conf.d
 coolify_caddy_config_path: "{{ coolify_caddy_config_dir }}/coolify.caddy"
 
+coolify_manage_localhost_ssh_bootstrap: false
 coolify_ssh_user: root
 coolify_ssh_key_path: "{{ coolify_base_dir }}/ssh/keys/id.{{ coolify_ssh_user }}@host.docker.internal"

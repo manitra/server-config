@@ -1,6 +1,16 @@
+- name: Build managed SSH key set
+  ansible.builtin.set_fact:
+    maintain_managed_authorized_keys: |
+      {% for f in lookup('fileglob', 'user-keys/*', wantlist=True) %}
+      {{ lookup('file', f) | trim }}
+      {% endfor %}
+      {% for key in maintain_host_authorized_keys | default([]) %}
+      {{ key | trim }}
+      {% endfor %}
+
 - name: Update user SSH keys (exclusive - removes unknown keys)
   ansible.posix.authorized_key:
     user: '{{ ansible_user }}'
-    key: "{% for f in lookup('fileglob', 'user-keys/*', wantlist=True) %}{{ lookup('file', f) }}\n{% endfor %}"
+    key: '{{ maintain_managed_authorized_keys }}'
     state: present
     exclusive: true

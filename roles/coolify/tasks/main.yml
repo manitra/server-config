@@ -156,11 +156,13 @@
     owner: root
     group: root
     mode: "0700"
+  when: coolify_manage_localhost_ssh_bootstrap
 
 - name: Generate Coolify local SSH key
   command:
     cmd: "ssh-keygen -t ed25519 -a 100 -f {{ coolify_ssh_key_path }} -q -N '' -C coolify"
     creates: "{{ coolify_ssh_key_path }}"
+  when: coolify_manage_localhost_ssh_bootstrap
 
 - name: Set Coolify local SSH key permissions
   file:
@@ -168,6 +170,7 @@
     owner: "9999"
     group: root
     mode: "0600"
+  when: coolify_manage_localhost_ssh_bootstrap
 
 - name: Read Coolify local SSH public key
   command: "ssh-keygen -y -f {{ coolify_ssh_key_path }}"
@@ -175,6 +178,7 @@
   register: coolify_local_public_key
   changed_when: false
   no_log: true
+  when: coolify_manage_localhost_ssh_bootstrap
 
 - name: Authorize Coolify local SSH key
   authorized_key:
@@ -183,6 +187,7 @@
     comment: coolify
     state: present
   no_log: true
+  when: coolify_manage_localhost_ssh_bootstrap
 
 - name: Start Coolify
   community.docker.docker_compose_v2:

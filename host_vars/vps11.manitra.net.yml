@@ -1,0 +1,3 @@
+---
+maintain_host_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE18BZLOKNMd6aDEMC7/8R8d2oOyfvezyl3dgTujBH9t coolify

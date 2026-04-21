@@ -2,14 +2,21 @@
   ansible.builtin.command: journalctl --vacuum-size=10M
   become: true
 
+- name: Check whether nginx log directory exists
+  ansible.builtin.stat:
+    path: /var/log/nginx
+  register: maintain_nginx_log_dir
+
 - name: Clean nginx log archives
   ansible.builtin.shell: rm -f /var/log/nginx/domains/*.log.*
   become: true
   ignore_errors: true
+  when: maintain_nginx_log_dir.stat.exists
 
 - name: Truncate nginx logs to last 5000 lines
   ansible.builtin.shell: find /var/log/nginx -type f -name "*.log" -exec sh -c 'tail -n 5000 "$1" > "$1.tmp" && mv "$1.tmp" "$1"' _ {} \;
   ignore_errors: true
+  when: maintain_nginx_log_dir.stat.exists
 
 - name: Clean snapd cache
   ansible.builtin.shell: rm -rf /var/lib/snapd/cache/*
