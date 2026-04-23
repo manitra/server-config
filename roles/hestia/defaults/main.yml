@@ -46,3 +46,9 @@ hestia_spam_cleanup_script: /usr/local/sbin/hestia-clean-spam-maildirs
 hestia_spam_cleanup_cron_file: /etc/cron.d/hestia-clean-spam-maildirs
 hestia_spam_cleanup_hour: '3'
 hestia_spam_cleanup_minute: '23'
+
+# Incremental (restic) backup cron for hestiaweb
+# Set to true to ensure the cron entry exists, false to ensure it is absent.
+hestia_incremental_backup_cron: false
+hestia_incremental_backup_cron_hour: '2'
+hestia_incremental_backup_cron_minute: '23'

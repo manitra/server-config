@@ -80,3 +80,13 @@
     state: absent
   when: hestia_fail2ban_ignore_ips | length == 0
   notify: "reload fail2ban"
+
+- name: "Manage incremental backup cron for hestiaweb"
+  become: true
+  ansible.builtin.cron:
+    name: "hestia incremental backup"
+    user: hestiaweb
+    minute: "{{ hestia_incremental_backup_cron_minute }}"
+    hour: "{{ hestia_incremental_backup_cron_hour }}"
+    job: "sudo /usr/local/hestia/bin/v-backup-users-restic"
+    state: "{{ 'present' if hestia_incremental_backup_cron else 'absent' }}"
