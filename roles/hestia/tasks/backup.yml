@@ -13,6 +13,18 @@
         (hestia_server_backup_config.content | b64decode | regex_search("(?m)^BACKUP_INCREMENTAL='yes'$")) is not none
       }}
 
+- name: "Assert recovery passphrase is defined when recovery-key management is enabled"
+  ansible.builtin.assert:
+    that:
+      - hestia_restic_recovery_password | length > 0
+      - hestia_restic_recovery_password != 'CHANGE_ME_RESTIC_RECOVERY_PASSWORD'
+    fail_msg: >-
+      Define hestia_restic_recovery_password in group_vars/hestia/vault.yml or
+      override it in host_vars/<host>/vault.yml before enabling
+      hestia_restic_recovery_key_manage.
+  when: hestia_restic_recovery_key_manage | bool
+    and hestia_server_incremental_backup_enabled | bool
+
 - name: "Find Hestia user config files"
   become: true
   ansible.builtin.find:
@@ -32,6 +44,106 @@
     backrefs: false
   loop: "{{ hestia_user_config_files.files }}"
   when: hestia_server_incremental_backup_enabled | bool
+
+- name: "Read Hestia restic repository config"
+  become: true
+  ansible.builtin.slurp:
+    src: /usr/local/hestia/conf/restic.conf
+  register: hestia_restic_repo_config
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+
+- name: "Extract Hestia restic repository base"
+  ansible.builtin.set_fact:
+    hestia_restic_repo_base: >-
+      {{
+        (hestia_restic_repo_config.content | b64decode | regex_findall("(?m)^REPO='([^']+)'$") | first)
+      }}
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+
+- name: "Check Hestia automation restic password files"
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item.path | dirname }}/restic.conf"
+  loop: "{{ hestia_user_config_files.files }}"
+  register: hestia_restic_password_files
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+
+- name: "Initialize restic recovery-key candidates"
+  ansible.builtin.set_fact:
+    hestia_restic_recovery_key_candidates: []
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+
+- name: "Build restic recovery-key candidates"
+  ansible.builtin.set_fact:
+    hestia_restic_recovery_key_candidates: >-
+      {{
+        (hestia_restic_recovery_key_candidates | default([]))
+        +
+        [{
+          'user': item.item.path | dirname | basename,
+          'repo': hestia_restic_repo_base ~ (item.item.path | dirname | basename),
+          'password_file': (item.item.path | dirname) ~ '/restic.conf'
+        }]
+      }}
+  loop: "{{ hestia_restic_password_files.results }}"
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+    - item.stat.exists
+
+- name: "List restic keys for candidate repositories"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - restic
+      - -r
+      - "{{ item.repo }}"
+      - -p
+      - "{{ item.password_file }}"
+      - key
+      - list
+  loop: "{{ hestia_restic_recovery_key_candidates | default([]) }}"
+  register: hestia_restic_key_lists
+  changed_when: false
+  failed_when: false
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+
+- name: "Add restic recovery key when labeled key is missing"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - restic
+      - -r
+      - "{{ item.item.repo }}"
+      - -p
+      - "{{ item.item.password_file }}"
+      - key
+      - add
+      - --user
+      - "{{ hestia_restic_recovery_key_user }}"
+      - --host
+      - "{{ hestia_restic_recovery_key_host }}"
+      - --new-password-file
+      - /dev/stdin
+    stdin: "{{ hestia_restic_recovery_password }}"
+    stdin_add_newline: true
+  loop: "{{ hestia_restic_key_lists.results | default([]) }}"
+  no_log: true
+  when:
+    - hestia_server_incremental_backup_enabled | bool
+    - hestia_restic_recovery_key_manage | bool
+    - item.rc == 0
+    - (item.stdout | regex_search('(?m)^\\*?[0-9a-f]+\\s+' ~ hestia_restic_recovery_key_user ~ '\\s+' ~ (hestia_restic_recovery_key_host | replace('.', '\\\\.')) ~ '\\s+')) is none
 
 - name: "Read v-backup-user-restic before hotfix"
   become: true

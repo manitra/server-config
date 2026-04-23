@@ -3,7 +3,7 @@ server_hostname: "{{ inventory_hostname }}"
 
 # Install flags for hestiacp install script
 # values 'yes' or 'no'
-hestia_install_flags: 
+hestia_install_flags:
   apache: 'no'
   phpfpm: 'yes'
   multiphp: 'yes'
@@ -23,3 +23,5 @@ hestia_install_flags:
   api: 'yes'
   port: '8083'
   lang: 'en'
+
+hestia_restic_recovery_key_manage: true

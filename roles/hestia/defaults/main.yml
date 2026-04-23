@@ -53,3 +53,7 @@ hestia_incremental_backup_cron: false
 hestia_incremental_backup_cron_hour: '2'
 hestia_incremental_backup_cron_minute: '23'
 hestia_restic_guard_hotfix_enabled: true
+hestia_restic_recovery_key_manage: false
+hestia_restic_recovery_key_user: ansible-recovery
+hestia_restic_recovery_key_host: "{{ inventory_hostname }}"
+hestia_restic_recovery_password: ""
