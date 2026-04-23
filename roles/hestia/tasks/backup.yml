@@ -1,5 +1,38 @@
 ---
 
+- name: "Read Hestia server backup config"
+  become: true
+  ansible.builtin.slurp:
+    src: /usr/local/hestia/conf/hestia.conf
+  register: hestia_server_backup_config
+
+- name: "Detect whether server-global incremental backup is enabled"
+  ansible.builtin.set_fact:
+    hestia_server_incremental_backup_enabled: >-
+      {{
+        (hestia_server_backup_config.content | b64decode | regex_search("(?m)^BACKUP_INCREMENTAL='yes'$")) is not none
+      }}
+
+- name: "Find Hestia user config files"
+  become: true
+  ansible.builtin.find:
+    paths: /usr/local/hestia/data/users
+    patterns: user.conf
+    file_type: file
+    recurse: true
+  register: hestia_user_config_files
+  when: hestia_server_incremental_backup_enabled | bool
+
+- name: "Enable incremental backup for all Hestia users"
+  become: true
+  ansible.builtin.lineinfile:
+    path: "{{ item.path }}"
+    regexp: "^BACKUPS_INCREMENTAL="
+    line: "BACKUPS_INCREMENTAL='yes'"
+    backrefs: false
+  loop: "{{ hestia_user_config_files.files }}"
+  when: hestia_server_incremental_backup_enabled | bool
+
 - name: "Read v-backup-user-restic before hotfix"
   become: true
   ansible.builtin.slurp:
