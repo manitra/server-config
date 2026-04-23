@@ -52,3 +52,4 @@ hestia_spam_cleanup_minute: '23'
 hestia_incremental_backup_cron: false
 hestia_incremental_backup_cron_hour: '2'
 hestia_incremental_backup_cron_minute: '23'
+hestia_restic_guard_hotfix_enabled: true

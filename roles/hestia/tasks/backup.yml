@@ -1,0 +1,86 @@
+---
+
+- name: "Read v-backup-user-restic before hotfix"
+  become: true
+  ansible.builtin.slurp:
+    src: /usr/local/hestia/bin/v-backup-user-restic
+  register: hestia_restic_script_before
+  when:
+    - hestia_incremental_backup_cron | bool
+    - hestia_restic_guard_hotfix_enabled | bool
+
+- name: "Apply localized hotfix for BACKUP_SYSTEM guard in restic backup"
+  become: true
+  ansible.builtin.replace:
+    path: /usr/local/hestia/bin/v-backup-user-restic
+    regexp: |
+      is_format_valid 'user'
+      is_system_enabled "\$BACKUP_SYSTEM" 'BACKUP_SYSTEM'
+      is_object_valid 'user' 'USER' "\$user"
+    replace: |
+      is_format_valid 'user'
+      is_object_valid 'user' 'USER' "$user"
+  when:
+    - hestia_incremental_backup_cron | bool
+    - hestia_restic_guard_hotfix_enabled | bool
+
+- name: "Read v-backup-user-restic after hotfix"
+  become: true
+  ansible.builtin.slurp:
+    src: /usr/local/hestia/bin/v-backup-user-restic
+  register: hestia_restic_script_after
+  when:
+    - hestia_incremental_backup_cron | bool
+    - hestia_restic_guard_hotfix_enabled | bool
+
+- name: "Assert restic hotfix state is valid"
+  ansible.builtin.assert:
+    that:
+      - (hestia_restic_after_text | regex_search("is_format_valid 'user'\\nis_object_valid 'user' 'USER' \"\\$user\"")) is not none
+      - (hestia_restic_after_text | regex_search("is_format_valid 'user'\\nis_system_enabled \"\\$BACKUP_SYSTEM\" 'BACKUP_SYSTEM'\\nis_object_valid 'user' 'USER' \"\\$user\"")) is none
+      - (hestia_restic_before_text | regex_search("is_format_valid 'user'\\n(is_system_enabled \"\\$BACKUP_SYSTEM\" 'BACKUP_SYSTEM'\\n)?is_object_valid 'user' 'USER' \"\\$user\"")) is not none
+    fail_msg: >-
+      Could not safely apply or validate the localized restic hotfix.
+      Hestia likely changed lines near the target block in /usr/local/hestia/bin/v-backup-user-restic.
+  vars:
+    hestia_restic_before_text: "{{ hestia_restic_script_before.content | b64decode }}"
+    hestia_restic_after_text: "{{ hestia_restic_script_after.content | b64decode }}"
+  when:
+    - hestia_incremental_backup_cron | bool
+    - hestia_restic_guard_hotfix_enabled | bool
+
+- name: "Read hestiaweb crontab"
+  become: true
+  ansible.builtin.command: crontab -u hestiaweb -l
+  register: hestia_hestiaweb_crontab
+  changed_when: false
+  failed_when: hestia_hestiaweb_crontab.rc not in [0, 1]
+  when: hestia_incremental_backup_cron | bool
+
+- name: "Detect existing restic cron entries"
+  ansible.builtin.set_fact:
+    hestia_restic_cron_exists_any: "{{ (hestia_hestiaweb_crontab.stdout | regex_search('(?m)^[^#\\n].*v-backup-users-restic\\b')) is not none }}"
+    hestia_restic_cron_exists_managed: "{{ (hestia_hestiaweb_crontab.stdout | regex_search('(?m)^#Ansible: hestia incremental backup$')) is not none }}"
+  when: hestia_incremental_backup_cron | bool
+
+- name: "Ensure managed incremental backup cron for hestiaweb"
+  become: true
+  ansible.builtin.cron:
+    name: "hestia incremental backup"
+    user: hestiaweb
+    minute: "{{ hestia_incremental_backup_cron_minute }}"
+    hour: "{{ hestia_incremental_backup_cron_hour }}"
+    job: "sudo /usr/local/hestia/bin/v-backup-users-restic"
+    state: present
+  when:
+    - hestia_incremental_backup_cron | bool
+    - hestia_restic_cron_exists_managed or not hestia_restic_cron_exists_any
+
+- name: "Remove managed incremental backup cron when disabled"
+  become: true
+  ansible.builtin.cron:
+    name: "hestia incremental backup"
+    user: hestiaweb
+    job: "sudo /usr/local/hestia/bin/v-backup-users-restic"
+    state: absent
+  when: not hestia_incremental_backup_cron | bool

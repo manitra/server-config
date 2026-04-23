@@ -1,0 +1,41 @@
+---
+
+- name: "Check whether HestiaCP is already installed"
+  become: true
+  stat:
+    path: /usr/local/hestia
+  register: hestia_installed
+
+- name: "Install HestiaCP if it is not already installed"
+  become: true
+  shell: >
+    curl -fsSL https://raw.githubusercontent.com/hestiacp/hestiacp/release/install/hst-install.sh
+    | bash -s -- --interactive no
+    --email {{ hestia_admin_mail | quote }}
+    --password {{ hestia_admin_pw | quote }}
+    --hostname {{ server_hostname | quote }}
+    --apache {{ hestia_install_flags.apache }}
+    --phpfpm {{ hestia_install_flags.phpfpm }}
+    --multiphp {{ hestia_install_flags.multiphp }}
+    --vsftpd {{ hestia_install_flags.vsftpd }}
+    --proftpd {{ hestia_install_flags.proftpd }}
+    --named {{ hestia_install_flags.named }}
+    --mysql {{ hestia_install_flags.mysql }}
+    --postgresql {{ hestia_install_flags.postgresql }}
+    --exim {{ hestia_install_flags.exim }}
+    --dovecot {{ hestia_install_flags.dovecot }}
+    --sieve {{ hestia_install_flags.sieve }}
+    --clamav {{ hestia_install_flags.clamav }}
+    --spamassassin {{ hestia_install_flags.spamassassin }}
+    --iptables {{ hestia_install_flags.iptables }}
+    --fail2ban {{ hestia_install_flags.fail2ban }}
+    --quota {{ hestia_install_flags.quota }}
+    --api {{ hestia_install_flags.api }}
+    --port {{ hestia_install_flags.port }}
+    --lang {{ hestia_install_flags.lang }}
+    -f
+  args:
+    creates: /usr/local/hestia
+    executable: /bin/bash
+  when: not hestia_installed.stat.exists
+  notify: reboot server

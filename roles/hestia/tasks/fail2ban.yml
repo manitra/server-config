@@ -1,0 +1,35 @@
+---
+
+- name: "Configure Fail2Ban trusted client IPs"
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ hestia_fail2ban_ignore_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible: trusted client IPs fail2ban should leave alone.
+      {% for entry in hestia_fail2ban_ignore_ips %}
+      # {{ entry.name }}: {{ entry.ip }}
+      {% endfor %}
+      [DEFAULT]
+      ignoreip = {{ hestia_fail2ban_ignore_ips | map(attribute='ip') | join(' ') }}
+  when: hestia_fail2ban_ignore_ips | length > 0
+  notify: "reload fail2ban"
+
+- name: "Remove legacy Fail2Ban trusted client IP files"
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ hestia_fail2ban_ignore_legacy_files }}"
+  when: hestia_fail2ban_ignore_legacy_files | length > 0
+  notify: "reload fail2ban"
+
+- name: "Remove managed Fail2Ban trusted client IPs when empty"
+  become: true
+  ansible.builtin.file:
+    path: "{{ hestia_fail2ban_ignore_file }}"
+    state: absent
+  when: hestia_fail2ban_ignore_ips | length == 0
+  notify: "reload fail2ban"

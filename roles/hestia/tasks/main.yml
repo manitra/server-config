@@ -1,45 +1,8 @@
 ---
 # tasks file for hestiacp
 
-- name: "Check whether HestiaCP is already installed"
-  become: true
-  stat:
-    path: /usr/local/hestia
-  register: hestia_installed
-
-- name: "Install HestiaCP if it is not already installed"
-  become: true
-  shell: >
-    curl -fsSL https://raw.githubusercontent.com/hestiacp/hestiacp/release/install/hst-install.sh
-    | bash -s -- --interactive no
-    --email {{ hestia_admin_mail | quote }}
-    --password {{ hestia_admin_pw | quote }}
-    --hostname {{ server_hostname | quote }}
-    --apache {{ hestia_install_flags.apache }}
-    --phpfpm {{ hestia_install_flags.phpfpm }}
-    --multiphp {{ hestia_install_flags.multiphp }}
-    --vsftpd {{ hestia_install_flags.vsftpd }}
-    --proftpd {{ hestia_install_flags.proftpd }}
-    --named {{ hestia_install_flags.named }}
-    --mysql {{ hestia_install_flags.mysql }}
-    --postgresql {{ hestia_install_flags.postgresql }}
-    --exim {{ hestia_install_flags.exim }}
-    --dovecot {{ hestia_install_flags.dovecot }}
-    --sieve {{ hestia_install_flags.sieve }}
-    --clamav {{ hestia_install_flags.clamav }}
-    --spamassassin {{ hestia_install_flags.spamassassin }}
-    --iptables {{ hestia_install_flags.iptables }}
-    --fail2ban {{ hestia_install_flags.fail2ban }}
-    --quota {{ hestia_install_flags.quota }}
-    --api {{ hestia_install_flags.api }}
-    --port {{ hestia_install_flags.port }}
-    --lang {{ hestia_install_flags.lang }}
-    -f
-  args:
-    creates: /usr/local/hestia
-    executable: /bin/bash
-  when: not hestia_installed.stat.exists
-  notify: reboot server
+- name: "Install HestiaCP"
+  import_tasks: install.yml
 
 - name: "Apply nginx restart guard"
   import_tasks: nginx-guard.yml
@@ -47,46 +10,8 @@
 - name: "Configure mail policy"
   import_tasks: mail-policy.yml
 
-- name: "Configure Fail2Ban trusted client IPs"
-  become: true
-  ansible.builtin.copy:
-    dest: "{{ hestia_fail2ban_ignore_file }}"
-    owner: root
-    group: root
-    mode: "0644"
-    content: |
-      # Managed by Ansible: trusted client IPs fail2ban should leave alone.
-      {% for entry in hestia_fail2ban_ignore_ips %}
-      # {{ entry.name }}: {{ entry.ip }}
-      {% endfor %}
-      [DEFAULT]
-      ignoreip = {{ hestia_fail2ban_ignore_ips | map(attribute='ip') | join(' ') }}
-  when: hestia_fail2ban_ignore_ips | length > 0
-  notify: "reload fail2ban"
+- name: "Configure Fail2Ban"
+  import_tasks: fail2ban.yml
 
-- name: "Remove legacy Fail2Ban trusted client IP files"
-  become: true
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop: "{{ hestia_fail2ban_ignore_legacy_files }}"
-  when: hestia_fail2ban_ignore_legacy_files | length > 0
-  notify: "reload fail2ban"
-
-- name: "Remove managed Fail2Ban trusted client IPs when empty"
-  become: true
-  ansible.builtin.file:
-    path: "{{ hestia_fail2ban_ignore_file }}"
-    state: absent
-  when: hestia_fail2ban_ignore_ips | length == 0
-  notify: "reload fail2ban"
-
-- name: "Manage incremental backup cron for hestiaweb"
-  become: true
-  ansible.builtin.cron:
-    name: "hestia incremental backup"
-    user: hestiaweb
-    minute: "{{ hestia_incremental_backup_cron_minute }}"
-    hour: "{{ hestia_incremental_backup_cron_hour }}"
-    job: "sudo /usr/local/hestia/bin/v-backup-users-restic"
-    state: "{{ 'present' if hestia_incremental_backup_cron else 'absent' }}"
+- name: "Configure backups"
+  import_tasks: backup.yml
