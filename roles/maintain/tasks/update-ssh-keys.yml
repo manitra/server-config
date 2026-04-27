@@ -31,7 +31,7 @@
     user: '{{ ansible_user }}'
     key: "{{ maintain_managed_authorized_keys | join('\n') }}"
     state: present
-    exclusive: true
+    exclusive: "{{ maintain_primary_authorized_keys_exclusive | default(true) | bool }}"
 
 - name: Build additional SSH key targets
   ansible.builtin.set_fact:

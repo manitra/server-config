@@ -51,6 +51,9 @@ The `coolify` role includes restic backup support for every host in the
 - `group_vars/coolify/main.yml` enables backup by default for the whole group.
 - `group_vars/coolify/main.yml` also defaults `coolify_domain` to the inventory
   hostname, so a new Coolify host answers on its own DNS name automatically.
+- `group_vars/coolify/main.yml` enables automatic localhost SSH bootstrap for
+  Coolify and keeps primary-user key management non-exclusive on those hosts so
+  the generated Coolify key is not stripped by the `maintain` role.
 - `group_vars/coolify/vault.yml` is now a **whole-file vault**, so
   `ansible-vault edit group_vars/coolify/vault.yml` works normally.
 - `group_vars/coolify/vault.example.yml` shows the plaintext structure,

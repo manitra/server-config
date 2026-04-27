@@ -4,9 +4,3 @@ maintain_host_managed_users:
     shell: /bin/bash
     create_home: true
     state: present
-
-maintain_host_authorized_key_targets:
-  - user: backuper
-    exclusive: false
-    keys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE18BZLOKNMd6aDEMC7/8R8d2oOyfvezyl3dgTujBH9t coolify
