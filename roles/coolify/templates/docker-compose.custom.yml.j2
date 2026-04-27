@@ -9,3 +9,10 @@ services:
     ports: !override
       - "{{ coolify_app_bind_address }}:{{ coolify_soketi_port }}:6001"
       - "{{ coolify_app_bind_address }}:{{ coolify_soketi_metrics_port }}:6002"
+
+volumes:
+{% for volume_name in coolify_external_volume_names %}
+  {{ volume_name }}:
+    external: true
+    name: {{ volume_name }}
+{% endfor %}

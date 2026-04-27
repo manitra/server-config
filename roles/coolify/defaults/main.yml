@@ -2,6 +2,10 @@
 coolify_base_dir: /data/coolify
 coolify_source_dir: "{{ coolify_base_dir }}/source"
 coolify_env_file: "{{ coolify_source_dir }}/.env"
+coolify_compose_project_name: "{{ coolify_source_dir | basename }}"
+coolify_external_volume_names:
+  - coolify-db
+  - coolify-redis
 coolify_cdn_url: https://cdn.coollabs.io/coolify
 
 coolify_app_name: Coolify

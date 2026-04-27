@@ -149,6 +149,12 @@
     driver: bridge
     state: present
 
+- name: Ensure Coolify Docker volumes exist
+  community.docker.docker_volume:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ coolify_external_volume_names }}"
+
 - name: Ensure root SSH directory exists
   file:
     path: /root/.ssh
@@ -192,7 +198,7 @@
 - name: Start Coolify
   community.docker.docker_compose_v2:
     project_src: "{{ coolify_source_dir }}"
-    project_name: coolify
+    project_name: "{{ coolify_compose_project_name }}"
     files:
       - docker-compose.yml
       - docker-compose.prod.yml
