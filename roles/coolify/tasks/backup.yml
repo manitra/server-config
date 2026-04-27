@@ -1,0 +1,199 @@
+---
+
+# Coolify restic backup automation
+# =================================
+# Mirrors the pattern established by roles/hestia/tasks/backup.yml.
+#
+# Destination (backup host – vps06 today)
+# ----------------------------------------
+# Same backuper@vps06 account used by Hestia hosts:
+#   - Unix account `backuper` on vps06
+#   - SSH public-key access for root@<source-host>
+#   - Directory /home/backuper/backup/<server>/ on vps06
+#   - Standard OpenSSH SFTP (no special restic server required)
+#
+# Source host requirements (vps11 / any future coolify host)
+# ----------------------------------------------------------
+#   - restic binary installed (this task file installs it via apt)
+#   - Docker running with the Coolify stack up
+#   - root SSH key added to /home/backuper/.ssh/authorized_keys on vps06
+#   - coolify_restic_repo set, e.g.:
+#       sftp:backuper@vps06.manitra.net:/home/backuper/backup/vps11/restic-coolify
+#   - coolify_restic_password set in host_vars/<host>/vault.yml (ansible-vault)
+#
+# What this task file automates
+# ------------------------------
+#   - Installs restic from the OS package manager
+#   - Writes the restic password file to coolify_restic_password_file
+#     (default: /etc/restic/coolify.password, outside the backup path)
+#   - Deploys the backup wrapper script from coolify-backup.sh.j2
+#   - Optionally adds a labeled recovery key to the repo
+#     (coolify_restic_recovery_key_manage)
+#   - Manages a root cron entry for the nightly backup job
+#
+# Backup strategy summary
+# -----------------------
+#   1. pg_dumpall inside the coolify-db container → consistent SQL dump
+#   2. `restic backup /data/coolify` EXCLUDING /data/coolify/databases
+#      (raw Postgres data dir – unsafe for live file-level snapshots)
+#   3. `restic forget --prune` with configurable retention
+#   4. Local dump removed once stored in restic
+#
+# How to onboard another Coolify host
+# ------------------------------------
+#   1. Create /home/backuper/backup/<new-server>/ on vps06.
+#   2. Add root SSH public key of new host to backuper@vps06 authorized_keys.
+#   3. Set in host_vars/<new-host>/main.yml:
+#        coolify_restic_backup_enabled: true
+#        coolify_restic_repo: "sftp:backuper@vps06.manitra.net:/home/backuper/backup/<new-server>/restic-coolify"
+#   4. Set in host_vars/<new-host>/vault.yml (ansible-vault encrypted):
+#        coolify_restic_password: "<strong-random-password>"
+#        coolify_restic_recovery_password: "<recovery-password>"   # if managing recovery keys
+#   5. Set coolify_restic_recovery_key_manage: true if desired.
+#   6. Run hourly.yml (or target the coolify role directly).
+
+- name: "Install restic"
+  become: true
+  ansible.builtin.apt:
+    name: restic
+    state: present
+    update_cache: false
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Assert restic repo and password are configured"
+  ansible.builtin.assert:
+    that:
+      - coolify_restic_repo | length > 0
+      - coolify_restic_password | length > 0
+    fail_msg: >-
+      coolify_restic_backup_enabled is true but coolify_restic_repo or
+      coolify_restic_password is empty.  Set both in
+      host_vars/{{ inventory_hostname }}/vault.yml (ansible-vault encrypted)
+      and host_vars/{{ inventory_hostname }}/main.yml before enabling backup.
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Assert recovery passphrase is defined when recovery-key management is enabled"
+  ansible.builtin.assert:
+    that:
+      - coolify_restic_recovery_password | length > 0
+    fail_msg: >-
+      coolify_restic_recovery_key_manage is true but
+      coolify_restic_recovery_password is empty.  Add it to
+      host_vars/{{ inventory_hostname }}/vault.yml (ansible-vault encrypted).
+  when:
+    - coolify_restic_backup_enabled | bool
+    - coolify_restic_recovery_key_manage | bool
+
+- name: "Ensure restic password file directory exists"
+  become: true
+  ansible.builtin.file:
+    path: "{{ coolify_restic_password_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Deploy restic password file"
+  become: true
+  ansible.builtin.copy:
+    content: "{{ coolify_restic_password }}\n"
+    dest: "{{ coolify_restic_password_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Deploy Coolify backup script"
+  become: true
+  ansible.builtin.template:
+    src: coolify-backup.sh.j2
+    dest: "{{ coolify_backup_script_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Remove Coolify backup script when backup is disabled"
+  become: true
+  ansible.builtin.file:
+    path: "{{ coolify_backup_script_path }}"
+    state: absent
+  when: not coolify_restic_backup_enabled | bool
+
+# ── Recovery key management ───────────────────────────────────────────────────
+# Requires the restic repo to already be initialised (happens on first backup
+# run).  Uses failed_when: false so this is a soft no-op on a brand-new repo.
+
+- name: "List restic keys for Coolify repository"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - restic
+      - -r
+      - "{{ coolify_restic_repo }}"
+      - -p
+      - "{{ coolify_restic_password_file }}"
+      - key
+      - list
+  register: coolify_restic_key_list
+  changed_when: false
+  failed_when: false
+  when:
+    - coolify_restic_backup_enabled | bool
+    - coolify_restic_recovery_key_manage | bool
+
+- name: "Add restic recovery key when labeled key is missing"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - restic
+      - -r
+      - "{{ coolify_restic_repo }}"
+      - -p
+      - "{{ coolify_restic_password_file }}"
+      - key
+      - add
+      - --user
+      - "{{ coolify_restic_recovery_key_user }}"
+      - --host
+      - "{{ coolify_restic_recovery_key_host }}"
+      - --new-password-file
+      - /dev/stdin
+    stdin: "{{ coolify_restic_recovery_password }}"
+    stdin_add_newline: true
+  no_log: true
+  when:
+    - coolify_restic_backup_enabled | bool
+    - coolify_restic_recovery_key_manage | bool
+    - coolify_restic_key_list.rc == 0
+    - >-
+      (coolify_restic_key_list.stdout
+       | regex_search('(?m)^\\*?[0-9a-f]+\\s+'
+         ~ coolify_restic_recovery_key_user ~ '\\s+'
+         ~ (coolify_restic_recovery_key_host | replace('.', '\\\\.'))
+         ~ '\\s+')) is none
+
+# ── Cron management ───────────────────────────────────────────────────────────
+
+- name: "Ensure Coolify backup cron entry"
+  become: true
+  ansible.builtin.cron:
+    name: "coolify restic backup"
+    user: root
+    minute: "{{ coolify_restic_backup_cron_minute }}"
+    hour: "{{ coolify_restic_backup_cron_hour }}"
+    job: >-
+      {{ coolify_backup_script_path }}
+      >> /var/log/coolify-backup.log 2>&1
+    state: present
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Remove Coolify backup cron when disabled"
+  become: true
+  ansible.builtin.cron:
+    name: "coolify restic backup"
+    user: root
+    state: absent
+  when: not coolify_restic_backup_enabled | bool

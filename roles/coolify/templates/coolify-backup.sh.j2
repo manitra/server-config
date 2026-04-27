@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Coolify restic backup script
+# ============================
+# Managed by Ansible (roles/coolify/templates/coolify-backup.sh.j2).
+# Do NOT edit by hand – changes will be overwritten on the next run.
+#
+# Strategy
+# --------
+# 1. Dump Coolify's internal Postgres to a gzip file inside
+#    {{ coolify_base_dir }}/backups/.  This guarantees a crash-consistent
+#    database snapshot without stopping the container.
+# 2. Run `restic backup` against {{ coolify_base_dir }}, explicitly EXCLUDING
+#    the raw Postgres data directory ({{ coolify_base_dir }}/databases).
+#    That directory is NOT safe for live file-level snapshots; the pg_dump
+#    above is the authoritative database backup.
+# 3. Forget/prune old snapshots according to the retention policy.
+# 4. Remove the local dump file (it is already stored inside restic).
+#
+# Restic repository : {{ coolify_restic_repo }}
+# Backup retention  : daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }}
+# DB container      : {{ coolify_db_container_name }}
+# DB user           : {{ coolify_db_user }}
+
+set -euo pipefail
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+RESTIC_REPO="{{ coolify_restic_repo }}"
+RESTIC_PASSWORD_FILE="{{ coolify_restic_password_file }}"
+BACKUP_ROOT="{{ coolify_base_dir }}"
+DUMP_DIR="{{ coolify_base_dir }}/backups"
+DUMP_FILE="${DUMP_DIR}/ansible-db-dump.sql.gz"
+DB_CONTAINER="{{ coolify_db_container_name }}"
+DB_USER="{{ coolify_db_user }}"
+EXCLUDE_DB_DIR="{{ coolify_base_dir }}/databases"
+
+log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
+
+# ── Pre-flight checks ──────────────────────────────────────────────────────────
+log "Starting Coolify restic backup on $(hostname)"
+
+if ! command -v restic > /dev/null 2>&1; then
+  log "ERROR: restic is not installed. Aborting."
+  exit 1
+fi
+
+if ! docker inspect --format '{{ '{{' }}.State.Running{{ '}}' }}' "${DB_CONTAINER}" 2>/dev/null | grep -q '^true$'; then
+  log "ERROR: Container '${DB_CONTAINER}' is not running. Aborting."
+  exit 1
+fi
+
+# ── Initialize repo if this is the first run ──────────────────────────────────
+if ! restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" snapshots --quiet > /dev/null 2>&1; then
+  log "Repository not initialised – running restic init"
+  restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" init
+fi
+
+# ── Database dump ─────────────────────────────────────────────────────────────
+log "Dumping Coolify Postgres (container: ${DB_CONTAINER}, user: ${DB_USER})"
+mkdir -p "${DUMP_DIR}"
+docker exec "${DB_CONTAINER}" pg_dumpall -U "${DB_USER}" | gzip > "${DUMP_FILE}"
+log "Dump written to ${DUMP_FILE} ($(du -sh "${DUMP_FILE}" | cut -f1))"
+
+# ── Restic backup ─────────────────────────────────────────────────────────────
+log "Running restic backup (excluding ${EXCLUDE_DB_DIR})"
+restic \
+  -r "${RESTIC_REPO}" \
+  -p "${RESTIC_PASSWORD_FILE}" \
+  backup "${BACKUP_ROOT}" \
+  --exclude "${EXCLUDE_DB_DIR}" \
+  --tag coolify \
+  --tag "{{ inventory_hostname }}" \
+  --one-file-system
+
+# ── Prune old snapshots ───────────────────────────────────────────────────────
+log "Pruning old snapshots (keep: daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }})"
+restic \
+  -r "${RESTIC_REPO}" \
+  -p "${RESTIC_PASSWORD_FILE}" \
+  forget \
+  --keep-daily {{ coolify_restic_keep_daily }} \
+  --keep-weekly {{ coolify_restic_keep_weekly }} \
+  --keep-monthly {{ coolify_restic_keep_monthly }} \
+  --prune
+
+# ── Clean up local dump ───────────────────────────────────────────────────────
+rm -f "${DUMP_FILE}"
+log "Local dump removed – it is stored inside restic"
+
+log "Backup complete"

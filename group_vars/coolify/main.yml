@@ -1,0 +1,21 @@
+---
+# group_vars/coolify/main.yml
+# ============================
+# Variables that apply to every host in the [coolify] inventory group.
+#
+# Backup is disabled by default here and must be explicitly opted in per host
+# (host_vars/<host>/main.yml: coolify_restic_backup_enabled: true).
+# This mirrors the Hestia pattern where hestia_incremental_backup_cron
+# defaults to false and is enabled per-host.
+#
+# Required vault variables (add to host_vars/<host>/vault.yml, encrypted with
+# ansible-vault before enabling backup on any host):
+#
+#   coolify_restic_password: "<strong random password>"
+#     – encrypts the restic repository; generate with: openssl rand -base64 32
+#
+#   coolify_restic_recovery_password: "<recovery key password>"
+#     – only required when coolify_restic_recovery_key_manage: true
+#     – allows opening the repo without the operational password
+
+coolify_restic_backup_enabled: false

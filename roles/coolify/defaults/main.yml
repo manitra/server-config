@@ -21,3 +21,54 @@ coolify_caddy_config_path: "{{ coolify_caddy_config_dir }}/coolify.caddy"
 coolify_manage_localhost_ssh_bootstrap: false
 coolify_ssh_user: root
 coolify_ssh_key_path: "{{ coolify_base_dir }}/ssh/keys/id.{{ coolify_ssh_user }}@host.docker.internal"
+
+# ── Restic backup ──────────────────────────────────────────────────────────────
+# Set coolify_restic_backup_enabled: true in host_vars to activate.
+# Required secrets (add to host_vars/<host>/vault.yml, ansible-vault encrypted):
+#   coolify_restic_password         – restic repository encryption password
+#   coolify_restic_recovery_password – recovery-key password (when
+#                                      coolify_restic_recovery_key_manage: true)
+coolify_restic_backup_enabled: false
+
+# Restic repository on the backup host (SFTP, same backuper@vps06 model used
+# for Hestia).  Example value for vps11:
+#   sftp:backuper@vps06.manitra.net:/home/backuper/backup/vps11/restic-coolify
+coolify_restic_repo: ""
+
+# Password for the restic repository.  Override in host_vars vault – never
+# commit plaintext here.
+coolify_restic_password: ""
+
+# Path where Ansible writes the password file on the source host.
+# Lives outside /data/coolify so it is NOT included in the backup itself,
+# avoiding a circular dependency.
+coolify_restic_password_file: /etc/restic/coolify.password
+
+# Name of the Coolify internal Postgres container.
+# Verify with `docker ps --format '{{.Names}}'` on the server.
+# Coolify's upstream compose sets container_name: coolify-db explicitly.
+coolify_db_container_name: coolify-db
+
+# Postgres superuser inside the container used for pg_dumpall.
+coolify_db_user: coolify
+
+# Snapshot retention policy passed to `restic forget --prune`.
+coolify_restic_keep_daily: 7
+coolify_restic_keep_weekly: 4
+coolify_restic_keep_monthly: 3
+
+# Path of the backup wrapper script deployed to the source host.
+coolify_backup_script_path: /usr/local/sbin/coolify-backup
+
+# Cron schedule for the root cron entry.
+coolify_restic_backup_cron_hour: "3"
+coolify_restic_backup_cron_minute: "17"
+
+# Recovery-key management (mirrors hestia_restic_recovery_key_manage).
+# When true, Ansible ensures a labeled recovery key is present in the repo so
+# the repository can be unlocked with coolify_restic_recovery_password without
+# needing the operational password.
+coolify_restic_recovery_key_manage: false
+coolify_restic_recovery_key_user: ansible-recovery
+coolify_restic_recovery_key_host: "{{ inventory_hostname }}"
+coolify_restic_recovery_password: ""

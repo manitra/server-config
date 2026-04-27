@@ -236,3 +236,6 @@
   retries: 30
   delay: 5
   until: coolify_health_check.status == 200
+
+- name: "Configure restic backup"
+  import_tasks: backup.yml
