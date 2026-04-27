@@ -4,40 +4,383 @@
 # Coolify restic backup script
 # ============================
 # Managed by Ansible (roles/coolify/templates/coolify-backup.sh.j2).
-# Do NOT edit by hand – changes will be overwritten on the next run.
+# Do NOT edit by hand - changes will be overwritten on the next run.
 #
 # Strategy
 # --------
-# 1. Dump Coolify's internal Postgres to a gzip file inside
-#    {{ coolify_base_dir }}/backups/.  This guarantees a crash-consistent
-#    database snapshot without stopping the container.
-# 2. Run `restic backup` against {{ coolify_base_dir }}, explicitly EXCLUDING
-#    the raw Postgres data directory ({{ coolify_base_dir }}/databases).
-#    That directory is NOT safe for live file-level snapshots; the pg_dump
-#    above is the authoritative database backup.
-# 3. Forget/prune old snapshots according to the retention policy.
-# 4. Remove the local dump file (it is already stored inside restic).
+# 1. Run any manually configured logical DB dumps first.
+# 2. Auto-discover running Postgres/MySQL/MariaDB containers and dump them too.
+# 3. Auto-discover mounted host paths from running Docker containers.
+# 4. Back up the resulting data with restic while excluding raw live DB storage.
+# 5. Forget/prune old snapshots according to the retention policy.
+# 6. Remove generated dump files (they are already stored in restic).
 #
-# Restic repository : {{ coolify_restic_repo }}
-# Backup retention  : daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }}
-# DB container      : {{ coolify_db_container_name }}
-# DB user           : {{ coolify_db_user }}
+# Restic repository        : {{ coolify_restic_repo }}
+# Backup retention         : daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }}
+# Seed backup paths        : {{ coolify_restic_backup_paths | join(', ') }}
+# Seed excludes            : {{ coolify_restic_excludes | join(', ') }}
+# DB autodiscovery enabled : {{ coolify_backup_autodiscover_databases | ternary('true', 'false') }}
+# Mount autodiscovery      : {{ coolify_backup_autodiscover_mounts | ternary('true', 'false') }}
 
 set -euo pipefail
 
-# ── Configuration ──────────────────────────────────────────────────────────────
+# -- Configuration --------------------------------------------------------------
 RESTIC_REPO="{{ coolify_restic_repo }}"
 RESTIC_PASSWORD_FILE="{{ coolify_restic_password_file }}"
-BACKUP_ROOT="{{ coolify_base_dir }}"
-DUMP_DIR="{{ coolify_base_dir }}/backups"
-DUMP_FILE="${DUMP_DIR}/ansible-db-dump.sql.gz"
-DB_CONTAINER="{{ coolify_db_container_name }}"
-DB_USER="{{ coolify_db_user }}"
-EXCLUDE_DB_DIR="{{ coolify_base_dir }}/databases"
+GENERATED_DUMP_DIR="{{ coolify_backup_generated_dir }}"
+AUTO_DISCOVER_DATABASES="{{ coolify_backup_autodiscover_databases | ternary('true', 'false') }}"
+AUTO_DISCOVER_MOUNTS="{{ coolify_backup_autodiscover_mounts | ternary('true', 'false') }}"
+
+BACKUP_PATHS=(
+{% for backup_path in coolify_restic_backup_paths %}
+  "{{ backup_path }}"
+{% endfor %}
+)
+
+RESTIC_EXCLUDES=(
+{% for exclude_path in coolify_restic_excludes %}
+  "{{ exclude_path }}"
+{% endfor %}
+)
+
+SEEN_DB_KEYS=()
 
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 
-# ── Pre-flight checks ──────────────────────────────────────────────────────────
+cleanup() {
+  rm -rf "${GENERATED_DUMP_DIR}"
+}
+
+trap cleanup EXIT
+
+array_contains_value() {
+  local -n ref="$1"
+  local candidate="$2"
+  local existing
+
+  for existing in "${ref[@]}"; do
+    if [ "${existing}" = "${candidate}" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+array_covers_path() {
+  local -n ref="$1"
+  local candidate="$2"
+  local existing
+
+  for existing in "${ref[@]}"; do
+    case "${candidate}" in
+      "${existing}"|"${existing}"/*)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+add_path_unique() {
+  local -n ref="$1"
+  local candidate="$2"
+  local existing
+  local filtered=()
+
+  if [ -z "${candidate}" ]; then
+    return 0
+  fi
+
+  case "${candidate}" in
+    /proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*)
+      return 0
+      ;;
+  esac
+
+  if [ "${candidate}" = "/var/run/docker.sock" ] || [ -S "${candidate}" ]; then
+    return 0
+  fi
+
+  for existing in "${ref[@]}"; do
+    if [ "${existing}" = "${candidate}" ]; then
+      return 0
+    fi
+
+    case "${candidate}" in
+      "${existing}"/*)
+        return 0
+        ;;
+    esac
+  done
+
+  for existing in "${ref[@]}"; do
+    case "${existing}" in
+      "${candidate}"/*)
+        ;;
+      *)
+        filtered+=("${existing}")
+        ;;
+    esac
+  done
+
+  filtered+=("${candidate}")
+  ref=("${filtered[@]}")
+}
+
+resolve_container() {
+  local exact_name="$1"
+  local prefix="$2"
+  local match=""
+  local matches=0
+  local running_name
+
+  if [ -n "${exact_name}" ] \
+    && docker inspect --format '{{ '{{' }}.State.Running{{ '}}' }}' "${exact_name}" 2>/dev/null | grep -q '^true$'; then
+    printf '%s\n' "${exact_name}"
+    return 0
+  fi
+
+  if [ -n "${prefix}" ]; then
+    while IFS= read -r running_name; do
+      case "${running_name}" in
+        "${prefix}"*)
+          match="${running_name}"
+          matches=$((matches + 1))
+          ;;
+      esac
+    done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+
+    if [ "${matches}" -eq 1 ]; then
+      printf '%s\n' "${match}"
+      return 0
+    fi
+
+    if [ "${matches}" -gt 1 ]; then
+      log "ERROR: Multiple running containers match prefix '${prefix}'. Aborting."
+      return 1
+    fi
+  fi
+
+  if [ -n "${exact_name}" ]; then
+    log "ERROR: Container '${exact_name}' is not running. Aborting."
+  else
+    log "ERROR: No running container matches prefix '${prefix}'. Aborting."
+  fi
+  return 1
+}
+
+container_env_value() {
+  local container="$1"
+  local key="$2"
+
+  docker inspect --format '{{ '{{' }}range .Config.Env{{ '}}' }}{{ '{{' }}println .{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null \
+    | awk -F= -v key="${key}" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+container_has_env_key() {
+  local container="$1"
+  local key="$2"
+
+  docker inspect --format '{{ '{{' }}range .Config.Env{{ '}}' }}{{ '{{' }}println .{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null \
+    | grep -q "^${key}="
+}
+
+container_db_mount_key() {
+  local container="$1"
+
+  docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}if or (eq .Destination "/var/lib/postgresql/data") (eq .Destination "/var/lib/mysql"){{ '}}' }}{{ '{{' }}println .Source{{ '}}' }}{{ '{{' }}end{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null \
+    | sort -u \
+    | paste -sd, -
+}
+
+register_db_mount_excludes() {
+  local container="$1"
+  local mount_source
+
+  while IFS= read -r mount_source; do
+    add_path_unique RESTIC_EXCLUDES "${mount_source}"
+  done < <(
+    docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}if or (eq .Destination "/var/lib/postgresql/data") (eq .Destination "/var/lib/mysql"){{ '}}' }}{{ '{{' }}println .Source{{ '}}' }}{{ '{{' }}end{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null
+  )
+}
+
+sanitize_name() {
+  printf '%s' "$1" | tr '/: ' '---' | tr -cd '[:alnum:]._-'
+}
+
+run_postgres_dump() {
+  local container="$1"
+  local user="$2"
+  local password_env="$3"
+  local extra_args="$4"
+  local output="$5"
+
+  mkdir -p "$(dirname "${output}")"
+  if [ -n "${password_env}" ]; then
+    docker exec "${container}" sh -lc \
+      "set -eu; export PGPASSWORD=\"\${${password_env}}\"; exec pg_dumpall -U \"${user}\" ${extra_args}" \
+      | gzip > "${output}"
+  else
+    docker exec "${container}" sh -lc \
+      "set -eu; exec pg_dumpall -U \"${user}\" ${extra_args}" \
+      | gzip > "${output}"
+  fi
+}
+
+run_mysql_dump() {
+  local container="$1"
+  local user="$2"
+  local password_env="$3"
+  local extra_args="$4"
+  local output="$5"
+
+  mkdir -p "$(dirname "${output}")"
+  if [ -n "${password_env}" ]; then
+    docker exec "${container}" sh -lc \
+      "set -eu; exec mysqldump --single-transaction --quick --routines --events --all-databases -u\"${user}\" -p\"\${${password_env}}\" ${extra_args}" \
+      | gzip > "${output}"
+  else
+    docker exec "${container}" sh -lc \
+      "set -eu; exec mysqldump --single-transaction --quick --routines --events --all-databases -u\"${user}\" ${extra_args}" \
+      | gzip > "${output}"
+  fi
+}
+
+run_dump_entry() {
+  local dump_name="$1"
+  local container="$2"
+  local dump_type="$3"
+  local user="$4"
+  local password_env="$5"
+  local extra_args="$6"
+  local output="$7"
+  local db_key=""
+
+  db_key="$(container_db_mount_key "${container}")"
+  if [ -z "${db_key}" ]; then
+    db_key="${container}"
+  fi
+
+  if array_contains_value SEEN_DB_KEYS "${db_key}"; then
+    log "Skipping duplicate dump '${dump_name}' because its DB storage is already covered"
+    return 0
+  fi
+
+  SEEN_DB_KEYS+=("${db_key}")
+  register_db_mount_excludes "${container}"
+
+  log "Dumping ${dump_name} (type=${dump_type}, container=${container})"
+  case "${dump_type}" in
+    postgres)
+      run_postgres_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}"
+      ;;
+    mysql|mariadb)
+      run_mysql_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}"
+      ;;
+    *)
+      log "ERROR: Unsupported dump type '${dump_type}'. Aborting."
+      exit 1
+      ;;
+  esac
+  log "Dump written to ${output} ($(du -sh "${output}" | cut -f1))"
+}
+
+discover_database_dumps() {
+  local container
+  local image
+  local image_lower
+  local dump_type
+  local user
+  local password_env
+  local output
+
+  while IFS= read -r container; do
+    image="$(docker inspect --format '{{ '{{' }}.Config.Image{{ '}}' }}' "${container}" 2>/dev/null || true)"
+    image_lower="$(printf '%s' "${image}" | tr '[:upper:]' '[:lower:]')"
+    dump_type=""
+    user=""
+    password_env=""
+
+    case "${image_lower}" in
+      *postgres*)
+        dump_type="postgres"
+        user="$(container_env_value "${container}" POSTGRES_USER)"
+        if [ -z "${user}" ]; then
+          user="postgres"
+        fi
+        if container_has_env_key "${container}" POSTGRES_PASSWORD; then
+          password_env="POSTGRES_PASSWORD"
+        fi
+        ;;
+      *mariadb*)
+        dump_type="mariadb"
+        user="root"
+        if container_has_env_key "${container}" MARIADB_ROOT_PASSWORD; then
+          password_env="MARIADB_ROOT_PASSWORD"
+        elif container_has_env_key "${container}" MYSQL_ROOT_PASSWORD; then
+          password_env="MYSQL_ROOT_PASSWORD"
+        fi
+        ;;
+      *mysql*)
+        dump_type="mysql"
+        user="root"
+        if container_has_env_key "${container}" MYSQL_ROOT_PASSWORD; then
+          password_env="MYSQL_ROOT_PASSWORD"
+        elif container_has_env_key "${container}" MARIADB_ROOT_PASSWORD; then
+          password_env="MARIADB_ROOT_PASSWORD"
+        fi
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    output="${GENERATED_DUMP_DIR}/auto-$(sanitize_name "${container}").sql.gz"
+    run_dump_entry "${container}" "${container}" "${dump_type}" "${user}" "${password_env}" "" "${output}"
+  done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+}
+
+discover_backup_mounts() {
+  local container
+  local mount_type
+  local mount_source
+  local mount_destination
+
+  while IFS= read -r container; do
+    while IFS='|' read -r mount_type mount_source mount_destination; do
+      if [ -z "${mount_source}" ]; then
+        continue
+      fi
+
+      case "${mount_type}" in
+        bind|volume)
+          ;;
+        *)
+          continue
+          ;;
+      esac
+
+      case "${mount_destination}" in
+        /var/lib/postgresql/data|/var/lib/mysql)
+          add_path_unique RESTIC_EXCLUDES "${mount_source}"
+          continue
+          ;;
+      esac
+
+      if array_covers_path RESTIC_EXCLUDES "${mount_source}"; then
+        continue
+      fi
+
+      add_path_unique BACKUP_PATHS "${mount_source}"
+    done < <(
+      docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}println .Type "|" .Source "|" .Destination{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null
+    )
+  done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+}
+
+# -- Pre-flight checks ----------------------------------------------------------
 log "Starting Coolify restic backup on $(hostname)"
 
 if ! command -v restic > /dev/null 2>&1; then
@@ -45,35 +388,66 @@ if ! command -v restic > /dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker inspect --format '{{ '{{' }}.State.Running{{ '}}' }}' "${DB_CONTAINER}" 2>/dev/null | grep -q '^true$'; then
-  log "ERROR: Container '${DB_CONTAINER}' is not running. Aborting."
-  exit 1
-fi
-
-# ── Initialize repo if this is the first run ──────────────────────────────────
+# -- Initialize repo if this is the first run ----------------------------------
 if ! restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" snapshots --quiet > /dev/null 2>&1; then
-  log "Repository not initialised – running restic init"
+  log "Repository not initialised - running restic init"
   restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" init
 fi
 
-# ── Database dump ─────────────────────────────────────────────────────────────
-log "Dumping Coolify Postgres (container: ${DB_CONTAINER}, user: ${DB_USER})"
-mkdir -p "${DUMP_DIR}"
-docker exec "${DB_CONTAINER}" pg_dumpall -U "${DB_USER}" | gzip > "${DUMP_FILE}"
-log "Dump written to ${DUMP_FILE} ($(du -sh "${DUMP_FILE}" | cut -f1))"
+# -- Logical database dumps -----------------------------------------------------
+rm -rf "${GENERATED_DUMP_DIR}"
+mkdir -p "${GENERATED_DUMP_DIR}"
 
-# ── Restic backup ─────────────────────────────────────────────────────────────
-log "Running restic backup (excluding ${EXCLUDE_DB_DIR})"
-restic \
-  -r "${RESTIC_REPO}" \
-  -p "${RESTIC_PASSWORD_FILE}" \
-  backup "${BACKUP_ROOT}" \
-  --exclude "${EXCLUDE_DB_DIR}" \
-  --tag coolify \
-  --tag "{{ inventory_hostname }}" \
+{% for dump in coolify_backup_database_dumps + coolify_backup_database_dumps_extra %}
+container_name="$(resolve_container "{{ dump.container | default('') }}" "{{ dump.container_name_prefix | default('') }}")"
+run_dump_entry "{{ dump.name }}" "${container_name}" "{{ dump.type }}" "{{ dump.user }}" "{{ dump.password_env | default('') }}" "{{ dump.extra_args | default('') }}" "{{ dump.output }}"
+{% endfor %}
+
+if [ "${AUTO_DISCOVER_DATABASES}" = "true" ]; then
+  log "Auto-discovering database containers"
+  discover_database_dumps
+fi
+
+if [ "${AUTO_DISCOVER_MOUNTS}" = "true" ]; then
+  log "Auto-discovering Docker mount paths"
+  discover_backup_mounts
+fi
+
+add_path_unique BACKUP_PATHS "${GENERATED_DUMP_DIR}"
+
+if [ "${BACKUP_PATHS[0]+set}" != "set" ]; then
+  log "ERROR: No backup paths resolved. Aborting."
+  exit 1
+fi
+
+log "Final backup paths: ${BACKUP_PATHS[*]}"
+log "Final excludes: ${RESTIC_EXCLUDES[*]}"
+
+# -- Restic backup --------------------------------------------------------------
+log "Running restic backup"
+restic_args=(
+  -r "${RESTIC_REPO}"
+  -p "${RESTIC_PASSWORD_FILE}"
+  backup
+)
+
+for backup_path in "${BACKUP_PATHS[@]}"; do
+  restic_args+=("${backup_path}")
+done
+
+for exclude_path in "${RESTIC_EXCLUDES[@]}"; do
+  restic_args+=(--exclude "${exclude_path}")
+done
+
+restic_args+=(
+  --tag coolify
+  --tag "{{ inventory_hostname }}"
   --one-file-system
+)
 
-# ── Prune old snapshots ───────────────────────────────────────────────────────
+restic "${restic_args[@]}"
+
+# -- Prune old snapshots --------------------------------------------------------
 log "Pruning old snapshots (keep: daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }})"
 restic \
   -r "${RESTIC_REPO}" \
@@ -84,8 +458,8 @@ restic \
   --keep-monthly {{ coolify_restic_keep_monthly }} \
   --prune
 
-# ── Clean up local dump ───────────────────────────────────────────────────────
-rm -f "${DUMP_FILE}"
-log "Local dump removed – it is stored inside restic"
+# -- Clean up local dumps -------------------------------------------------------
+rm -rf "${GENERATED_DUMP_DIR}"
+log "Generated dumps removed - they are stored inside restic"
 
 log "Backup complete"

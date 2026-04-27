@@ -1,16 +1,60 @@
-- name: Build managed SSH key set
+- name: Initialize repo-managed SSH key list
   ansible.builtin.set_fact:
-    maintain_managed_authorized_keys: |
-      {% for f in lookup('fileglob', 'user-keys/*', wantlist=True) %}
-      {{ lookup('file', f) | trim }}
-      {% endfor %}
-      {% for key in maintain_host_authorized_keys | default([]) %}
-      {{ key | trim }}
-      {% endfor %}
+    maintain_repo_authorized_keys: []
 
-- name: Update user SSH keys (exclusive - removes unknown keys)
+- name: Collect repo-managed SSH public keys
+  ansible.builtin.set_fact:
+    maintain_repo_authorized_keys: >-
+      {{
+        (maintain_repo_authorized_keys | default([]))
+        + [lookup('file', item) | trim]
+      }}
+  loop: "{{ query('fileglob', role_path ~ '/files/user-keys/*') }}"
+
+- name: Build managed SSH key set for primary user
+  ansible.builtin.set_fact:
+    maintain_managed_authorized_keys: >-
+      {{
+        (
+          (maintain_repo_authorized_keys | default([]))
+          + (maintain_group_authorized_keys | default([]))
+          + (maintain_host_authorized_keys | default([]))
+        )
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+
+- name: Update primary user SSH keys (exclusive - removes unknown keys)
   ansible.posix.authorized_key:
     user: '{{ ansible_user }}'
-    key: '{{ maintain_managed_authorized_keys }}'
+    key: "{{ maintain_managed_authorized_keys | join('\n') }}"
     state: present
     exclusive: true
+
+- name: Build additional SSH key targets
+  ansible.builtin.set_fact:
+    maintain_authorized_key_targets: >-
+      {{
+        (maintain_group_authorized_key_targets | default([]))
+        + (maintain_host_authorized_key_targets | default([]))
+      }}
+
+- name: Update additional user SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ item.user }}"
+    key: >-
+      {{
+        (item.keys | default([]))
+        | map('trim')
+        | reject('equalto', '')
+        | unique
+        | join('\n')
+      }}
+    state: present
+    exclusive: "{{ item.exclusive | default(false) | bool }}"
+  loop: "{{ maintain_authorized_key_targets }}"
+  loop_control:
+    label: "{{ item.user }}"
+  when: item.keys | default([]) | length > 0

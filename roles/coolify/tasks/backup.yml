@@ -16,41 +16,39 @@
 # ----------------------------------------------------------
 #   - restic binary installed (this task file installs it via apt)
 #   - Docker running with the Coolify stack up
-#   - root SSH key added to /home/backuper/.ssh/authorized_keys on vps06
-#   - coolify_restic_repo set, e.g.:
-#       sftp:backuper@vps06.manitra.net:/home/backuper/backup/vps11/restic-coolify
-#   - coolify_restic_password set in host_vars/<host>/vault.yml (ansible-vault)
+#   - coolify_restic_password set in group_vars/coolify/vault.yml
 #
 # What this task file automates
 # ------------------------------
 #   - Installs restic from the OS package manager
+#   - Ensures the source host has a root SSH key for SFTP access
+#   - Trusts the backup host SSH host key on the source host
+#   - Creates /home/backuper/backup/<host> on vps06 automatically
+#   - Authorizes the source host root SSH public key for backuper@vps06
 #   - Writes the restic password file to coolify_restic_password_file
 #     (default: /etc/restic/coolify.password, outside the backup path)
 #   - Deploys the backup wrapper script from coolify-backup.sh.j2
+#   - Auto-discovers running Postgres/MySQL/MariaDB containers and Docker mount
+#     paths by default
+#   - Supports manual overrides via coolify_backup_database_dumps(_extra)
+#     (`container_name_prefix` is supported for timestamped Coolify app containers)
 #   - Optionally adds a labeled recovery key to the repo
 #     (coolify_restic_recovery_key_manage)
 #   - Manages a root cron entry for the nightly backup job
 #
 # Backup strategy summary
 # -----------------------
-#   1. pg_dumpall inside the coolify-db container → consistent SQL dump
-#   2. `restic backup /data/coolify` EXCLUDING /data/coolify/databases
-#      (raw Postgres data dir – unsafe for live file-level snapshots)
+#   1. Logical dumps inside database containers → consistent SQL dumps
+#   2. `restic backup` of app/config/upload paths excluding raw live DB dirs
 #   3. `restic forget --prune` with configurable retention
 #   4. Local dump removed once stored in restic
 #
 # How to onboard another Coolify host
 # ------------------------------------
-#   1. Create /home/backuper/backup/<new-server>/ on vps06.
-#   2. Add root SSH public key of new host to backuper@vps06 authorized_keys.
-#   3. Set in host_vars/<new-host>/main.yml:
-#        coolify_restic_backup_enabled: true
-#        coolify_restic_repo: "sftp:backuper@vps06.manitra.net:/home/backuper/backup/<new-server>/restic-coolify"
-#   4. Set in host_vars/<new-host>/vault.yml (ansible-vault encrypted):
-#        coolify_restic_password: "<strong-random-password>"
-#        coolify_restic_recovery_password: "<recovery-password>"   # if managing recovery keys
-#   5. Set coolify_restic_recovery_key_manage: true if desired.
-#   6. Run hourly.yml (or target the coolify role directly).
+#   1. Add the host to [coolify] in inventory.ini.
+#   2. Run hourly.yml (or target the coolify role directly).
+#   3. Add host_vars/<host>/main.yml only for exceptions such as extra excludes,
+#      custom dump definitions, or a non-default public Coolify domain.
 
 - name: "Install restic"
   become: true
@@ -64,12 +62,18 @@
   ansible.builtin.assert:
     that:
       - coolify_restic_repo | length > 0
+      - coolify_restic_backup_host | length > 0
       - coolify_restic_password | length > 0
+      - >-
+        (coolify_restic_backup_paths | length > 0)
+        or
+        (coolify_backup_autodiscover_mounts | bool)
     fail_msg: >-
       coolify_restic_backup_enabled is true but coolify_restic_repo or
-      coolify_restic_password is empty.  Set both in
-      host_vars/{{ inventory_hostname }}/vault.yml (ansible-vault encrypted)
-      and host_vars/{{ inventory_hostname }}/main.yml before enabling backup.
+      coolify_restic_password is empty, or the backup host is not configured,
+      and neither seed backup paths nor mount autodiscovery are configured.
+      Set them in group_vars/coolify/main.yml and group_vars/coolify/vault.yml
+      before enabling backup.
   when: coolify_restic_backup_enabled | bool
 
 - name: "Assert recovery passphrase is defined when recovery-key management is enabled"
@@ -78,11 +82,27 @@
       - coolify_restic_recovery_password | length > 0
     fail_msg: >-
       coolify_restic_recovery_key_manage is true but
-      coolify_restic_recovery_password is empty.  Add it to
-      host_vars/{{ inventory_hostname }}/vault.yml (ansible-vault encrypted).
+      coolify_restic_recovery_password is empty. Add it to
+      group_vars/coolify/vault.yml (ansible-vault encrypted).
   when:
     - coolify_restic_backup_enabled | bool
     - coolify_restic_recovery_key_manage | bool
+
+- name: "Validate logical dump definitions"
+  ansible.builtin.assert:
+    that:
+      - item.name | length > 0
+      - item.type in ['postgres', 'mysql', 'mariadb']
+      - >-
+        (item.container | default('') | length > 0)
+        or
+        (item.container_name_prefix | default('') | length > 0)
+      - item.user | length > 0
+      - item.output | length > 0
+    fail_msg: >-
+      Invalid entry in coolify_backup_database_dumps(_extra): {{ item | to_nice_yaml(indent=2) }}
+  loop: "{{ coolify_backup_database_dumps + coolify_backup_database_dumps_extra }}"
+  when: coolify_restic_backup_enabled | bool
 
 - name: "Ensure restic password file directory exists"
   become: true
@@ -92,6 +112,87 @@
     owner: root
     group: root
     mode: "0700"
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Ensure root SSH directory exists for restic SFTP"
+  become: true
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Ensure root SSH key exists for restic SFTP"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -t
+      - ed25519
+      - -a
+      - "100"
+      - -f
+      - /root/.ssh/id_ed25519
+      - -q
+      - -N
+      - ""
+      - -C
+      - "root@{{ inventory_hostname }}"
+  args:
+    creates: /root/.ssh/id_ed25519
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Read root SSH public key for restic SFTP"
+  become: true
+  ansible.builtin.slurp:
+    src: /root/.ssh/id_ed25519.pub
+  register: coolify_restic_source_public_key
+  no_log: true
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Scan backup host SSH key"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - ssh-keyscan
+      - "{{ coolify_restic_backup_host }}"
+  register: coolify_restic_backup_host_keyscan
+  changed_when: false
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Trust backup host SSH key for restic SFTP"
+  become: true
+  ansible.builtin.known_hosts:
+    path: /root/.ssh/known_hosts
+    name: "{{ coolify_restic_backup_host }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ coolify_restic_backup_host_keyscan.stdout_lines }}"
+  when:
+    - coolify_restic_backup_enabled | bool
+    - coolify_restic_backup_host_keyscan.stdout_lines | length > 0
+
+- name: "Ensure Coolify backup directory exists on backup host"
+  become: true
+  ansible.builtin.file:
+    path: "{{ coolify_restic_repo_directory }}"
+    state: directory
+    owner: "{{ coolify_restic_backup_destination_user }}"
+    group: "{{ coolify_restic_backup_destination_user }}"
+    mode: "0700"
+  delegate_to: "{{ coolify_restic_backup_host }}"
+  when: coolify_restic_backup_enabled | bool
+
+- name: "Authorize source host root SSH key on backup host"
+  become: true
+  ansible.posix.authorized_key:
+    user: "{{ coolify_restic_backup_destination_user }}"
+    key: "{{ coolify_restic_source_public_key.content | b64decode | trim }}"
+    state: present
+  delegate_to: "{{ coolify_restic_backup_host }}"
+  no_log: true
   when: coolify_restic_backup_enabled | bool
 
 - name: "Deploy restic password file"
@@ -171,9 +272,9 @@
     - >-
       (coolify_restic_key_list.stdout
        | regex_search('(?m)^\\*?[0-9a-f]+\\s+'
-         ~ coolify_restic_recovery_key_user ~ '\\s+'
-         ~ (coolify_restic_recovery_key_host | replace('.', '\\\\.'))
-         ~ '\\s+')) is none
+          ~ coolify_restic_recovery_key_user ~ '\\s+'
+          ~ (coolify_restic_recovery_key_host | replace('.', '\\\\.'))
+          ~ '\\s+')) is none
 
 # ── Cron management ───────────────────────────────────────────────────────────
 

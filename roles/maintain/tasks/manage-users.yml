@@ -1,0 +1,24 @@
+- name: Build managed extra user list
+  ansible.builtin.set_fact:
+    maintain_managed_users: >-
+      {{
+        (maintain_group_managed_users | default([]))
+        + (maintain_host_managed_users | default([]))
+      }}
+
+- name: Ensure managed extra users exist
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(omit) }}"
+    shell: "{{ item.shell | default(omit) }}"
+    home: "{{ item.home | default(omit) }}"
+    create_home: "{{ item.create_home | default(omit) }}"
+    group: "{{ item.group | default(omit) }}"
+    groups: "{{ item.groups | default(omit) }}"
+    append: "{{ item.append | default(omit) }}"
+    password_lock: "{{ item.password_lock | default(omit) }}"
+    system: "{{ item.system | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ maintain_managed_users }}"
+  loop_control:
+    label: "{{ item.name }}"

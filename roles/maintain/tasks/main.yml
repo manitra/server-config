@@ -9,6 +9,8 @@
 
 - import_tasks: update-package.yml
 
+- import_tasks: manage-users.yml
+
 - import_tasks: update-ssh-keys.yml
 
 - import_tasks: ufw.yml
