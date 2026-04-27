@@ -6,6 +6,9 @@
     state: present
   become: true
 
+- name: Reset SSH connection before UFW changes
+  meta: reset_connection
+
 - name: Reset and reconfigure UFW
   block:
     - name: Reset UFW to wipe any unknown rules
@@ -63,3 +66,8 @@
     - name: Fail the play after securing the firewall
       fail:
         msg: "UFW reconfiguration failed. Firewall re-enabled with SSH allowed. Check the errors above."
+  vars:
+    ansible_ssh_common_args: "-o ControlMaster=no -o ControlPersist=no"
+
+- name: Reset SSH connection after UFW changes
+  meta: reset_connection
