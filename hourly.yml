@@ -21,6 +21,8 @@
     - keycloak
 
 - hosts: jenkins
+  vars:
+    jenkins_plugin_updates_enabled: false
   roles:
     - jenkins
 
