@@ -1,5 +1,61 @@
 ---
 
+# Current live restic backup model for Hestia hosts
+# ================================================
+# This task file only automates the Hestia-side integration. The destination
+# side on the backup host is still manual for now, so keep this note in sync
+# with reality until that part is codified too.
+#
+# What exists on the backup host (vps06 today)
+# --------------------------------------------
+# - A normal Unix account named `backuper`
+# - SSH public-key access for the source host root account
+# - A writable directory per source server, for example:
+#   /home/backuper/backup/vps13
+# - Standard OpenSSH SFTP support; no special restic server is used
+#
+# What must exist on the Hestia source host
+# -----------------------------------------
+# - Hestia incremental backups enabled in /usr/local/hestia/conf/hestia.conf:
+#   BACKUP_INCREMENTAL='yes'
+# - A restic repository base configured in /usr/local/hestia/conf/restic.conf:
+#   REPO='sftp:backuper@vps06.manitra.net:/home/backuper/backup/<server>/restic-'
+# - Root SSH access from the source host to backuper@vps06.manitra.net
+# - One per-user restic password file at:
+#   /usr/local/hestia/data/users/<user>/restic.conf
+#
+# What this role currently automates
+# ----------------------------------
+# - Detect that server-global incremental backup is enabled
+# - Force BACKUPS_INCREMENTAL='yes' in every Hestia user.conf
+# - Read the repo base from /usr/local/hestia/conf/restic.conf
+# - Add a labeled recovery key to each user repository when missing
+# - Apply a localized hotfix to v-backup-user-restic so the managed cron can
+#   invoke it without tripping on the BACKUP_SYSTEM guard
+# - Manage a daily hestiaweb cron entry for:
+#   sudo /usr/local/hestia/bin/v-backup-users-restic
+#
+# Important runtime behavior
+# --------------------------
+# - Hestia creates one restic repository per Hestia user:
+#   restic-admin, restic-manitra, restic-paositrafi, ...
+# - v-backup-users-restic runs users sequentially, not in parallel
+# - restic still uses its own internal concurrency, but orchestration is
+#   single-user-at-a-time
+#
+# How to migrate another Hestia host to the same model
+# ----------------------------------------------------
+# 1. Create or reuse `backuper` on the backup host.
+# 2. Create /home/backuper/backup/<server>.
+# 3. Add the new source host root SSH public key to
+#    /home/backuper/.ssh/authorized_keys on the backup host.
+# 4. Configure /usr/local/hestia/conf/restic.conf on the source host with:
+#    REPO='sftp:backuper@vps06.manitra.net:/home/backuper/backup/<server>/restic-'
+# 5. Ensure BACKUP_INCREMENTAL='yes' in Hestia.
+# 6. Enable hestia_incremental_backup_cron for that host in inventory vars.
+# 7. Run this role so it enables per-user incremental backup, installs the
+#    hotfix, manages recovery keys, and creates the cron entry.
+#
 - name: "Read Hestia server backup config"
   become: true
   ansible.builtin.slurp:
