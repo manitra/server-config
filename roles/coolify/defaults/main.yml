@@ -35,14 +35,16 @@ coolify_ssh_key_path: "{{ coolify_base_dir }}/ssh/keys/id.{{ coolify_ssh_user }}
 #                                      coolify_restic_recovery_key_manage: true)
 coolify_restic_backup_enabled: false
 
-# Restic repository on the backup host (SFTP, same backuper@vps06 model used
-# for Hestia).
+# Restic repositories on the backup host (SFTP, same backuper@vps06 model used
+# for Hestia). One repo is created for the Coolify platform itself and one repo
+# per discovered Coolify application project.
 coolify_restic_backup_host: ""
 coolify_restic_backup_destination_user: backuper
 coolify_restic_backup_destination_base_path: /home/backuper/backup
 coolify_restic_repo_host_path: "{{ inventory_hostname.split('.')[0] }}"
 coolify_restic_repo_directory: "{{ coolify_restic_backup_destination_base_path }}/{{ coolify_restic_repo_host_path }}"
-coolify_restic_repo: ""
+coolify_restic_repo_base: ""
+coolify_restic_platform_repo_name: restic-coolify
 
 # Password for the restic repository. Group vaults should carry the normal
 # value; host_vars may still override it for exceptions. Never commit plaintext.
@@ -52,6 +54,7 @@ coolify_restic_password: ""
 # Lives outside /data/coolify so it is NOT included in the backup itself,
 # avoiding a circular dependency.
 coolify_restic_password_file: /etc/restic/coolify.password
+coolify_restic_recovery_password_file: /etc/restic/coolify-recovery.password
 
 # Directory where generated logical dumps are staged before restic reads them.
 coolify_backup_generated_dir: "{{ coolify_base_dir }}/backups/generated"
@@ -64,10 +67,15 @@ coolify_backup_autodiscover_databases: true
 # host-side paths automatically. Raw DB storage mounts are auto-excluded.
 coolify_backup_autodiscover_mounts: true
 
-# Seed paths included in the restic snapshot before runtime autodiscovery adds
-# extra Docker volume/bind-mount paths.
+# Seed paths for the platform repo before runtime autodiscovery adds extra
+# Docker volume/bind-mount paths. Application repos add their own project
+# checkout path automatically from /data/coolify/applications/<compose-project>.
 coolify_restic_backup_paths:
-  - "{{ coolify_base_dir }}"
+  - "{{ coolify_source_dir }}"
+  - "{{ coolify_base_dir }}/proxy"
+  - "{{ coolify_base_dir }}/services"
+  - "{{ coolify_base_dir }}/sentinel"
+  - "{{ coolify_base_dir }}/ssh"
 
 # Seed exclude paths. Runtime autodiscovery also adds raw live Postgres/MySQL
 # mount sources automatically so file-level restic snapshots do not touch them.

@@ -15,9 +15,10 @@
 # 5. Forget/prune old snapshots according to the retention policy.
 # 6. Remove generated dump files (they are already stored in restic).
 #
-# Restic repository        : {{ coolify_restic_repo }}
+# Restic repository base   : {{ coolify_restic_repo_base }}
+# Platform repository      : {{ coolify_restic_platform_repo_name }}
 # Backup retention         : daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }}
-# Seed backup paths        : {{ coolify_restic_backup_paths | join(', ') }}
+# Platform seed paths      : {{ coolify_restic_backup_paths | join(', ') }}
 # Seed excludes            : {{ coolify_restic_excludes | join(', ') }}
 # DB autodiscovery enabled : {{ coolify_backup_autodiscover_databases | ternary('true', 'false') }}
 # Mount autodiscovery      : {{ coolify_backup_autodiscover_mounts | ternary('true', 'false') }}
@@ -25,33 +26,52 @@
 set -euo pipefail
 
 # -- Configuration --------------------------------------------------------------
-RESTIC_REPO="{{ coolify_restic_repo }}"
+RESTIC_REPO_BASE="{{ coolify_restic_repo_base }}"
+PLATFORM_REPO_NAME="{{ coolify_restic_platform_repo_name }}"
 RESTIC_PASSWORD_FILE="{{ coolify_restic_password_file }}"
-GENERATED_DUMP_DIR="{{ coolify_backup_generated_dir }}"
+RECOVERY_KEY_MANAGE="{{ coolify_restic_recovery_key_manage | ternary('true', 'false') }}"
+RECOVERY_KEY_USER="{{ coolify_restic_recovery_key_user }}"
+RECOVERY_KEY_HOST="{{ coolify_restic_recovery_key_host }}"
+RECOVERY_PASSWORD_FILE="{{ coolify_restic_recovery_password_file }}"
+GENERATED_DUMP_ROOT="{{ coolify_backup_generated_dir }}"
 AUTO_DISCOVER_DATABASES="{{ coolify_backup_autodiscover_databases | ternary('true', 'false') }}"
 AUTO_DISCOVER_MOUNTS="{{ coolify_backup_autodiscover_mounts | ternary('true', 'false') }}"
+COOLIFY_BASE_DIR="{{ coolify_base_dir }}"
+COOLIFY_APPLICATIONS_DIR="{{ coolify_base_dir }}/applications"
 
-BACKUP_PATHS=(
+PLATFORM_SEED_PATHS=(
 {% for backup_path in coolify_restic_backup_paths %}
   "{{ backup_path }}"
 {% endfor %}
 )
 
-RESTIC_EXCLUDES=(
+GLOBAL_EXCLUDES=(
 {% for exclude_path in coolify_restic_excludes %}
   "{{ exclude_path }}"
 {% endfor %}
 )
 
+REPO_KEYS=()
 SEEN_DB_KEYS=()
+declare -A REPO_NAMES=()
+declare -A REPO_LABELS=()
+declare -A REPO_URIS=()
 
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 
 cleanup() {
-  rm -rf "${GENERATED_DUMP_DIR}"
+  rm -rf "${GENERATED_DUMP_ROOT}"
 }
 
 trap cleanup EXIT
+
+trim_whitespace() {
+  local value="$1"
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
 
 array_contains_value() {
   local -n ref="$1"
@@ -88,6 +108,8 @@ add_path_unique() {
   local candidate="$2"
   local existing
   local filtered=()
+
+  candidate="$(trim_whitespace "${candidate}")"
 
   if [ -z "${candidate}" ]; then
     return 0
@@ -196,11 +218,12 @@ container_db_mount_key() {
 }
 
 register_db_mount_excludes() {
-  local container="$1"
+  local repo_key="$1"
+  local container="$2"
   local mount_source
 
   while IFS= read -r mount_source; do
-    add_path_unique RESTIC_EXCLUDES "${mount_source}"
+    repo_add_exclude "${repo_key}" "${mount_source}"
   done < <(
     docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}if or (eq .Destination "/var/lib/postgresql/data") (eq .Destination "/var/lib/mysql"){{ '}}' }}{{ '{{' }}println .Source{{ '}}' }}{{ '{{' }}end{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null
   )
@@ -208,6 +231,215 @@ register_db_mount_excludes() {
 
 sanitize_name() {
   printf '%s' "$1" | tr '/: ' '---' | tr -cd '[:alnum:]._-'
+}
+
+repo_array_name() {
+  local key="$1"
+  local kind="$2"
+
+  printf 'REPO_%s_%s' "${kind}" "$(sanitize_name "${key}")"
+}
+
+repo_add_path() {
+  local key="$1"
+  local candidate="$2"
+  local array_name
+
+  array_name="$(repo_array_name "${key}" PATHS)"
+  add_path_unique "${array_name}" "${candidate}"
+}
+
+repo_add_exclude() {
+  local key="$1"
+  local candidate="$2"
+  local array_name
+
+  array_name="$(repo_array_name "${key}" EXCLUDES)"
+  add_path_unique "${array_name}" "${candidate}"
+}
+
+repo_dump_dir() {
+  local key="$1"
+
+  printf '%s/%s' "${GENERATED_DUMP_ROOT}" "${REPO_NAMES[${key}]}"
+}
+
+register_repo() {
+  local key="$1"
+  local repo_name="$2"
+  local label="$3"
+  local array_name
+  local exclude_path
+  local existing_key
+
+  if [ -n "${REPO_NAMES[${key}]+set}" ]; then
+    return 0
+  fi
+
+  for existing_key in "${REPO_KEYS[@]}"; do
+    if [ "${REPO_NAMES[${existing_key}]}" = "${repo_name}" ]; then
+      repo_name="${repo_name}-$(sanitize_name "${key}")"
+      break
+    fi
+  done
+
+  REPO_KEYS+=("${key}")
+  REPO_NAMES["${key}"]="${repo_name}"
+  REPO_LABELS["${key}"]="${label}"
+  REPO_URIS["${key}"]="${RESTIC_REPO_BASE}/${repo_name}"
+
+  array_name="$(repo_array_name "${key}" PATHS)"
+  eval "${array_name}=()"
+  array_name="$(repo_array_name "${key}" EXCLUDES)"
+  eval "${array_name}=()"
+
+  for exclude_path in "${GLOBAL_EXCLUDES[@]}"; do
+    repo_add_exclude "${key}" "${exclude_path}"
+  done
+}
+
+container_label_value() {
+  local container="$1"
+  local key="$2"
+
+  docker inspect --format "{{ '{{' }} index .Config.Labels \"${key}\" {{ '}}' }}" "${container}" 2>/dev/null \
+    | sed 's/^<no value>$//'
+}
+
+container_compose_project() {
+  container_label_value "$1" "com.docker.compose.project"
+}
+
+container_is_application() {
+  [ "$(container_label_value "$1" "coolify.type")" = "application" ]
+}
+
+list_relevant_containers() {
+  local container
+  local compose_project
+  local coolify_managed
+
+  while IFS= read -r container; do
+    [ -n "${container}" ] || continue
+
+    if container_is_application "${container}"; then
+      printf '%s\n' "${container}"
+      continue
+    fi
+
+    compose_project="$(container_compose_project "${container}")"
+    coolify_managed="$(container_label_value "${container}" "coolify.managed")"
+
+    case "${compose_project}" in
+      source|coolify-proxy)
+        printf '%s\n' "${container}"
+        continue
+        ;;
+    esac
+
+    if [ "${coolify_managed}" = "true" ]; then
+      printf '%s\n' "${container}"
+    fi
+  done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+}
+
+project_preferred_hostname() {
+  local compose_project="$1"
+  local container
+
+  while IFS= read -r container; do
+    docker inspect --format '{{ '{{' }}range $k, $v := .Config.Labels{{ '}}' }}{{ '{{' }}println $k "|" $v{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null || true
+  done < <(docker ps --filter "label=com.docker.compose.project=${compose_project}" --format '{{ '{{' }}.Names{{ '}}' }}') \
+    | while IFS='|' read -r label_key label_value; do
+        label_key="$(trim_whitespace "${label_key}")"
+        label_value="$(trim_whitespace "${label_value}")"
+
+        case "${label_key}" in
+          caddy_[0-9]|caddy_[0-9][0-9])
+            printf '%s\n' "${label_value}" \
+              | sed -nE 's#^[[:alpha:]]+://([^/]+).*$#\1#p'
+            ;;
+        esac
+      done \
+    | grep -E '([[:alnum:]-]+\.)+[[:alpha:]]{2,}$' \
+    | sort -u \
+    | head -n1
+}
+
+project_fallback_name() {
+  local compose_project="$1"
+  local container
+  local project_name
+
+  while IFS= read -r container; do
+    project_name="$(container_label_value "${container}" "coolify.projectName")"
+    if [ -n "${project_name}" ]; then
+      printf '%s\n' "${project_name}"
+      return 0
+    fi
+  done < <(docker ps --filter "label=com.docker.compose.project=${compose_project}" --format '{{ '{{' }}.Names{{ '}}' }}')
+
+  printf '%s\n' "${compose_project}"
+}
+
+register_application_repo_for_project() {
+  local compose_project="$1"
+  local preferred_name
+  local repo_name
+  local app_dir
+
+  preferred_name="$(project_preferred_hostname "${compose_project}")"
+  if [ -z "${preferred_name}" ]; then
+    preferred_name="$(project_fallback_name "${compose_project}")"
+  fi
+
+  repo_name="restic-$(sanitize_name "${preferred_name}")"
+  register_repo "${compose_project}" "${repo_name}" "${preferred_name}"
+
+  app_dir="${COOLIFY_APPLICATIONS_DIR}/${compose_project}"
+  if [ -d "${app_dir}" ]; then
+    repo_add_path "${compose_project}" "${app_dir}"
+  fi
+}
+
+seed_repositories() {
+  local backup_path
+  local container
+  local compose_project
+
+  register_repo "core" "${PLATFORM_REPO_NAME}" "coolify"
+  for backup_path in "${PLATFORM_SEED_PATHS[@]}"; do
+    repo_add_path "core" "${backup_path}"
+  done
+
+  while IFS= read -r container; do
+    if ! container_is_application "${container}"; then
+      continue
+    fi
+
+    compose_project="$(container_compose_project "${container}")"
+    if [ -z "${compose_project}" ]; then
+      continue
+    fi
+
+    register_application_repo_for_project "${compose_project}"
+  done < <(list_relevant_containers)
+}
+
+container_scope_key() {
+  local container="$1"
+  local compose_project
+
+  if container_is_application "${container}"; then
+    compose_project="$(container_compose_project "${container}")"
+    if [ -n "${compose_project}" ]; then
+      register_application_repo_for_project "${compose_project}"
+      printf '%s\n' "${compose_project}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' core
 }
 
 run_postgres_dump() {
@@ -249,13 +481,14 @@ run_mysql_dump() {
 }
 
 run_dump_entry() {
-  local dump_name="$1"
-  local container="$2"
-  local dump_type="$3"
-  local user="$4"
-  local password_env="$5"
-  local extra_args="$6"
-  local output="$7"
+  local repo_key="$1"
+  local dump_name="$2"
+  local container="$3"
+  local dump_type="$4"
+  local user="$5"
+  local password_env="$6"
+  local extra_args="$7"
+  local output="$8"
   local db_key=""
 
   db_key="$(container_db_mount_key "${container}")"
@@ -269,7 +502,8 @@ run_dump_entry() {
   fi
 
   SEEN_DB_KEYS+=("${db_key}")
-  register_db_mount_excludes "${container}"
+  register_db_mount_excludes "${repo_key}" "${container}"
+  repo_add_path "${repo_key}" "$(dirname "${output}")"
 
   log "Dumping ${dump_name} (type=${dump_type}, container=${container})"
   case "${dump_type}" in
@@ -292,6 +526,7 @@ discover_database_dumps() {
   local image
   local image_lower
   local dump_type
+  local repo_key
   local user
   local password_env
   local output
@@ -337,19 +572,30 @@ discover_database_dumps() {
         ;;
     esac
 
-    output="${GENERATED_DUMP_DIR}/auto-$(sanitize_name "${container}").sql.gz"
-    run_dump_entry "${container}" "${container}" "${dump_type}" "${user}" "${password_env}" "" "${output}"
-  done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+    repo_key="$(container_scope_key "${container}")"
+    output="$(repo_dump_dir "${repo_key}")/auto-$(sanitize_name "${container}").sql.gz"
+    run_dump_entry "${repo_key}" "${container}" "${container}" "${dump_type}" "${user}" "${password_env}" "" "${output}"
+  done < <(list_relevant_containers)
 }
 
 discover_backup_mounts() {
   local container
+  local repo_key
+  local exclude_array_name
   local mount_type
   local mount_source
   local mount_destination
 
   while IFS= read -r container; do
+    repo_key="$(container_scope_key "${container}")"
+    exclude_array_name="$(repo_array_name "${repo_key}" EXCLUDES)"
+    local -n repo_excludes_ref="${exclude_array_name}"
+
     while IFS='|' read -r mount_type mount_source mount_destination; do
+      mount_type="$(trim_whitespace "${mount_type}")"
+      mount_source="$(trim_whitespace "${mount_source}")"
+      mount_destination="$(trim_whitespace "${mount_destination}")"
+
       if [ -z "${mount_source}" ]; then
         continue
       fi
@@ -364,20 +610,116 @@ discover_backup_mounts() {
 
       case "${mount_destination}" in
         /var/lib/postgresql/data|/var/lib/mysql)
-          add_path_unique RESTIC_EXCLUDES "${mount_source}"
+          repo_add_exclude "${repo_key}" "${mount_source}"
           continue
           ;;
       esac
 
-      if array_covers_path RESTIC_EXCLUDES "${mount_source}"; then
+      if array_covers_path repo_excludes_ref "${mount_source}"; then
         continue
       fi
 
-      add_path_unique BACKUP_PATHS "${mount_source}"
+      repo_add_path "${repo_key}" "${mount_source}"
     done < <(
       docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}println .Type "|" .Source "|" .Destination{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null
     )
-  done < <(docker ps --format '{{ '{{' }}.Names{{ '}}' }}')
+  done < <(list_relevant_containers)
+}
+
+ensure_recovery_key() {
+  local repo_uri="$1"
+  local repo_name="$2"
+  local key_list
+
+  if [ "${RECOVERY_KEY_MANAGE}" != "true" ]; then
+    return 0
+  fi
+
+  if [ ! -s "${RECOVERY_PASSWORD_FILE}" ]; then
+    log "ERROR: Recovery password file ${RECOVERY_PASSWORD_FILE} is missing. Aborting."
+    exit 1
+  fi
+
+  key_list="$(restic -r "${repo_uri}" -p "${RESTIC_PASSWORD_FILE}" key list)"
+
+  if printf '%s\n' "${key_list}" | awk -v user="${RECOVERY_KEY_USER}" -v host="${RECOVERY_KEY_HOST}" '$2 == user && $3 == host { found = 1 } END { exit found ? 0 : 1 }'; then
+    return 0
+  fi
+
+  log "Adding recovery key for repo ${repo_name}"
+  restic \
+    -r "${repo_uri}" \
+    -p "${RESTIC_PASSWORD_FILE}" \
+    key add \
+    --user "${RECOVERY_KEY_USER}" \
+    --host "${RECOVERY_KEY_HOST}" \
+    --new-password-file "${RECOVERY_PASSWORD_FILE}"
+}
+
+run_repo_backup() {
+  local key="$1"
+  local repo_name="${REPO_NAMES[${key}]}"
+  local repo_label="${REPO_LABELS[${key}]}"
+  local repo_uri="${REPO_URIS[${key}]}"
+  local paths_array_name
+  local excludes_array_name
+  local backup_path
+  local exclude_path
+
+  paths_array_name="$(repo_array_name "${key}" PATHS)"
+  excludes_array_name="$(repo_array_name "${key}" EXCLUDES)"
+  local -n repo_paths="${paths_array_name}"
+  local -n repo_excludes="${excludes_array_name}"
+
+  if [ -z "${repo_paths[*]-}" ]; then
+    log "Skipping repo ${repo_name} (${repo_label}) because no backup paths were resolved"
+    return 0
+  fi
+
+  log "Preparing repo ${repo_name} (${repo_label})"
+  log "Repo ${repo_name} paths: ${repo_paths[*]}"
+  log "Repo ${repo_name} excludes: ${repo_excludes[*]}"
+
+  if ! restic -r "${repo_uri}" -p "${RESTIC_PASSWORD_FILE}" snapshots --quiet > /dev/null 2>&1; then
+    log "Repository ${repo_name} not initialised - running restic init"
+    restic -r "${repo_uri}" -p "${RESTIC_PASSWORD_FILE}" init
+  fi
+
+  ensure_recovery_key "${repo_uri}" "${repo_name}"
+
+  log "Running restic backup for ${repo_name}"
+  restic_args=(
+    -r "${repo_uri}"
+    -p "${RESTIC_PASSWORD_FILE}"
+    backup
+  )
+
+  for backup_path in "${repo_paths[@]}"; do
+    restic_args+=("${backup_path}")
+  done
+
+  for exclude_path in "${repo_excludes[@]}"; do
+    restic_args+=(--exclude "${exclude_path}")
+  done
+
+  restic_args+=(
+    --tag coolify
+    --tag "{{ inventory_hostname }}"
+    --tag "${repo_name}"
+    --one-file-system
+  )
+
+  restic "${restic_args[@]}"
+
+  log "Pruning repo ${repo_name} (keep: daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }})"
+  restic \
+    -r "${repo_uri}" \
+    -p "${RESTIC_PASSWORD_FILE}" \
+    forget \
+    --keep-daily {{ coolify_restic_keep_daily }} \
+    --keep-weekly {{ coolify_restic_keep_weekly }} \
+    --keep-monthly {{ coolify_restic_keep_monthly }} \
+    --prune
 }
 
 # -- Pre-flight checks ----------------------------------------------------------
@@ -388,19 +730,16 @@ if ! command -v restic > /dev/null 2>&1; then
   exit 1
 fi
 
-# -- Initialize repo if this is the first run ----------------------------------
-if ! restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" snapshots --quiet > /dev/null 2>&1; then
-  log "Repository not initialised - running restic init"
-  restic -r "${RESTIC_REPO}" -p "${RESTIC_PASSWORD_FILE}" init
-fi
-
 # -- Logical database dumps -----------------------------------------------------
-rm -rf "${GENERATED_DUMP_DIR}"
-mkdir -p "${GENERATED_DUMP_DIR}"
+rm -rf "${GENERATED_DUMP_ROOT}"
+mkdir -p "${GENERATED_DUMP_ROOT}"
+
+seed_repositories
 
 {% for dump in coolify_backup_database_dumps + coolify_backup_database_dumps_extra %}
 container_name="$(resolve_container "{{ dump.container | default('') }}" "{{ dump.container_name_prefix | default('') }}")"
-run_dump_entry "{{ dump.name }}" "${container_name}" "{{ dump.type }}" "{{ dump.user }}" "{{ dump.password_env | default('') }}" "{{ dump.extra_args | default('') }}" "{{ dump.output }}"
+repo_key="$(container_scope_key "${container_name}")"
+run_dump_entry "${repo_key}" "{{ dump.name }}" "${container_name}" "{{ dump.type }}" "{{ dump.user }}" "{{ dump.password_env | default('') }}" "{{ dump.extra_args | default('') }}" "{{ dump.output }}"
 {% endfor %}
 
 if [ "${AUTO_DISCOVER_DATABASES}" = "true" ]; then
@@ -413,53 +752,12 @@ if [ "${AUTO_DISCOVER_MOUNTS}" = "true" ]; then
   discover_backup_mounts
 fi
 
-add_path_unique BACKUP_PATHS "${GENERATED_DUMP_DIR}"
-
-if [ "${BACKUP_PATHS[0]+set}" != "set" ]; then
-  log "ERROR: No backup paths resolved. Aborting."
-  exit 1
-fi
-
-log "Final backup paths: ${BACKUP_PATHS[*]}"
-log "Final excludes: ${RESTIC_EXCLUDES[*]}"
-
-# -- Restic backup --------------------------------------------------------------
-log "Running restic backup"
-restic_args=(
-  -r "${RESTIC_REPO}"
-  -p "${RESTIC_PASSWORD_FILE}"
-  backup
-)
-
-for backup_path in "${BACKUP_PATHS[@]}"; do
-  restic_args+=("${backup_path}")
+for repo_key in "${REPO_KEYS[@]}"; do
+  run_repo_backup "${repo_key}"
 done
-
-for exclude_path in "${RESTIC_EXCLUDES[@]}"; do
-  restic_args+=(--exclude "${exclude_path}")
-done
-
-restic_args+=(
-  --tag coolify
-  --tag "{{ inventory_hostname }}"
-  --one-file-system
-)
-
-restic "${restic_args[@]}"
-
-# -- Prune old snapshots --------------------------------------------------------
-log "Pruning old snapshots (keep: daily={{ coolify_restic_keep_daily }} weekly={{ coolify_restic_keep_weekly }} monthly={{ coolify_restic_keep_monthly }})"
-restic \
-  -r "${RESTIC_REPO}" \
-  -p "${RESTIC_PASSWORD_FILE}" \
-  forget \
-  --keep-daily {{ coolify_restic_keep_daily }} \
-  --keep-weekly {{ coolify_restic_keep_weekly }} \
-  --keep-monthly {{ coolify_restic_keep_monthly }} \
-  --prune
 
 # -- Clean up local dumps -------------------------------------------------------
-rm -rf "${GENERATED_DUMP_DIR}"
+rm -rf "${GENERATED_DUMP_ROOT}"
 log "Generated dumps removed - they are stored inside restic"
 
 log "Backup complete"

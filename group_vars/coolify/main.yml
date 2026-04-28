@@ -38,7 +38,7 @@ coolify_restic_backup_host: vps06.manitra.net
 coolify_restic_backup_destination_user: backuper
 coolify_restic_backup_destination_base_path: /home/backuper/backup
 coolify_restic_repo_host_path: "{{ inventory_hostname.split('.')[0] }}"
-coolify_restic_repo: >-
-  sftp:{{ coolify_restic_backup_destination_user }}@{{ coolify_restic_backup_host }}:{{ coolify_restic_backup_destination_base_path }}/{{ coolify_restic_repo_host_path }}/restic-coolify
+coolify_restic_repo_base: >-
+  sftp:{{ coolify_restic_backup_destination_user }}@{{ coolify_restic_backup_host }}:{{ coolify_restic_backup_destination_base_path }}/{{ coolify_restic_repo_host_path }}
 
 coolify_restic_recovery_key_manage: true

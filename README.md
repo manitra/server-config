@@ -31,8 +31,10 @@ The `coolify` role includes restic backup support for every host in the
      directories, which are unsafe for live file snapshots.
    - Prunes old snapshots (daily/weekly/monthly retention).
    - Removes the generated dumps after they are safely stored in restic.
-3. The restic repository lives on `vps06` at
-   `/home/backuper/backup/<host>/restic-coolify`, accessed over SFTP as `backuper`.
+3. The restic repositories live on `vps06` under
+  `/home/backuper/backup/<host>/`, accessed over SFTP as `backuper`.
+  - `restic-coolify` stores the Coolify platform data.
+  - `restic-<public-domain>` stores each discovered Coolify application project.
 4. The role now bootstraps the source host SSH key, trusts `vps06`, creates the
    destination directory on `vps06`, and authorizes the source host key there.
 5. The `backuper` account on `vps06` is managed through the `maintain` role, so
@@ -58,8 +60,10 @@ The `coolify` role includes restic backup support for every host in the
   `ansible-vault edit group_vars/coolify/vault.yml` works normally.
 - `group_vars/coolify/vault.example.yml` shows the plaintext structure,
   including where `coolify_restic_recovery_password` is stored.
-- The repository path is derived automatically as:
-  `sftp:backuper@vps06.manitra.net:/home/backuper/backup/<inventory-short-host>/restic-coolify`
+- The repository base path is derived automatically as:
+  `sftp:backuper@vps06.manitra.net:/home/backuper/backup/<inventory-short-host>`
+- Each backup run creates or updates one repo per project, for example
+  `restic-coolify`, `restic-sign.mg`, or `restic-mission.eto.mg`.
 - Recovery-key management is enabled for the whole group.
 
 ### Manual overrides when autodiscovery is not enough

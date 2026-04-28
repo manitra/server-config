@@ -61,7 +61,7 @@
 - name: "Assert restic repo and password are configured"
   ansible.builtin.assert:
     that:
-      - coolify_restic_repo | length > 0
+      - coolify_restic_repo_base | length > 0
       - coolify_restic_backup_host | length > 0
       - coolify_restic_password | length > 0
       - >-
@@ -69,7 +69,7 @@
         or
         (coolify_backup_autodiscover_mounts | bool)
     fail_msg: >-
-      coolify_restic_backup_enabled is true but coolify_restic_repo or
+      coolify_restic_backup_enabled is true but coolify_restic_repo_base or
       coolify_restic_password is empty, or the backup host is not configured,
       and neither seed backup paths nor mount autodiscovery are configured.
       Set them in group_vars/coolify/main.yml and group_vars/coolify/vault.yml
@@ -206,6 +206,28 @@
   no_log: true
   when: coolify_restic_backup_enabled | bool
 
+- name: "Deploy restic recovery password file"
+  become: true
+  ansible.builtin.copy:
+    content: "{{ coolify_restic_recovery_password }}\n"
+    dest: "{{ coolify_restic_recovery_password_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when:
+    - coolify_restic_backup_enabled | bool
+    - coolify_restic_recovery_key_manage | bool
+
+- name: "Remove restic recovery password file when recovery-key management is disabled"
+  become: true
+  ansible.builtin.file:
+    path: "{{ coolify_restic_recovery_password_file }}"
+    state: absent
+  when:
+    - coolify_restic_backup_enabled | bool
+    - not coolify_restic_recovery_key_manage | bool
+
 - name: "Deploy Coolify backup script"
   become: true
   ansible.builtin.template:
@@ -222,59 +244,6 @@
     path: "{{ coolify_backup_script_path }}"
     state: absent
   when: not coolify_restic_backup_enabled | bool
-
-# ── Recovery key management ───────────────────────────────────────────────────
-# Requires the restic repo to already be initialised (happens on first backup
-# run).  Uses failed_when: false so this is a soft no-op on a brand-new repo.
-
-- name: "List restic keys for Coolify repository"
-  become: true
-  ansible.builtin.command:
-    argv:
-      - restic
-      - -r
-      - "{{ coolify_restic_repo }}"
-      - -p
-      - "{{ coolify_restic_password_file }}"
-      - key
-      - list
-  register: coolify_restic_key_list
-  changed_when: false
-  failed_when: false
-  when:
-    - coolify_restic_backup_enabled | bool
-    - coolify_restic_recovery_key_manage | bool
-
-- name: "Add restic recovery key when labeled key is missing"
-  become: true
-  ansible.builtin.command:
-    argv:
-      - restic
-      - -r
-      - "{{ coolify_restic_repo }}"
-      - -p
-      - "{{ coolify_restic_password_file }}"
-      - key
-      - add
-      - --user
-      - "{{ coolify_restic_recovery_key_user }}"
-      - --host
-      - "{{ coolify_restic_recovery_key_host }}"
-      - --new-password-file
-      - /dev/stdin
-    stdin: "{{ coolify_restic_recovery_password }}"
-    stdin_add_newline: true
-  no_log: true
-  when:
-    - coolify_restic_backup_enabled | bool
-    - coolify_restic_recovery_key_manage | bool
-    - coolify_restic_key_list.rc == 0
-    - >-
-      (coolify_restic_key_list.stdout
-       | regex_search('(?m)^\\*?[0-9a-f]+\\s+'
-          ~ coolify_restic_recovery_key_user ~ '\\s+'
-          ~ (coolify_restic_recovery_key_host | replace('.', '\\\\.'))
-          ~ '\\s+')) is none
 
 # ── Cron management ───────────────────────────────────────────────────────────
 
