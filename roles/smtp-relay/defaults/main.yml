@@ -14,5 +14,6 @@ relay_sender_login_maps_file: /etc/postfix/sender_login_maps.pcre
 relay_sasl_access_file: /etc/postfix/sasl_access.pcre
 relay_client_access_dir: /etc/postfix/relay-client-access
 relay_message_size_limit: 52428800
+relay_smtp_line_length_limit: 0
 
 relay_users: []
