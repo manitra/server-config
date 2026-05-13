@@ -41,6 +41,17 @@
     - hestia_exim_template.stat.exists | default(false)
   notify: "rebuild and restart exim4"
 
+- name: "Set Hestia Exim SMTP relay line length limit"
+  become: true
+  ansible.builtin.replace:
+    path: /etc/exim4/exim4.conf.template
+    regexp: '(smtp_relay_smtp:\n  driver = smtp\n)(?:  message_linelength_limit\s*=.*\n)?'
+    replace: '\1  message_linelength_limit = {{ hestia_mail_relay_message_linelength_limit }}\n'
+  when:
+    - hestia_mail_system_check.rc == 0
+    - hestia_exim_template.stat.exists | default(false)
+  notify: "rebuild and restart exim4"
+
 - name: "Install Hestia spam-folder cleanup script"
   become: true
   ansible.builtin.copy:
