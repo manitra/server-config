@@ -22,7 +22,7 @@
   become: true
   ansible.builtin.lineinfile:
     path: /etc/exim4/exim4.conf.template
-    regexp: '^SPAM_REJECT_SCORE\s*='
+    regexp: '^#?SPAM_REJECT_SCORE\s*='
     line: "SPAM_REJECT_SCORE = {{ (hestia_spam_reject_score | float * 10) | int }}"
   when:
     - hestia_mail_system_check.rc == 0
