@@ -7,9 +7,6 @@
 # automatically from the inventory hostname, so onboarding another Coolify host
 # only needs an inventory entry in the [coolify] group.
 #
-# The public Coolify UI hostname also defaults to the inventory hostname. Override
-# coolify_domain in host_vars only when a host should answer on a different name.
-#
 # Required vault variables live in group_vars/coolify/vault.yml.
 # See group_vars/coolify/vault.example.yml for the expected plaintext structure
 # before encrypting with ansible-vault:
@@ -30,7 +27,6 @@
 # and the Coolify role manages the local bootstrap key automatically.
 
 coolify_restic_backup_enabled: true
-coolify_domain: "{{ inventory_hostname }}"
 coolify_manage_localhost_ssh_bootstrap: true
 maintain_primary_authorized_keys_exclusive: false
 

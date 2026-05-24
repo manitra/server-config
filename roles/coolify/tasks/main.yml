@@ -209,30 +209,6 @@
     remove_orphans: true
     state: present
 
-- name: Ensure Caddy config directory exists
-  file:
-    path: "{{ coolify_caddy_config_dir }}"
-    state: directory
-    mode: "0755"
-  when: coolify_manage_caddy
-
-- name: Add Caddy conf.d import directive
-  lineinfile:
-    path: /etc/caddy/Caddyfile
-    line: "import /etc/caddy/conf.d/*.caddy"
-    insertafter: EOF
-    state: present
-  notify: Validate and reload caddy
-  when: coolify_manage_caddy
-
-- name: Deploy Coolify Caddy vhost config
-  template:
-    src: coolify.caddy.j2
-    dest: "{{ coolify_caddy_config_path }}"
-    mode: "0644"
-  notify: Validate and reload caddy
-  when: coolify_manage_caddy
-
 - name: Wait for Coolify health endpoint
   uri:
     url: "http://127.0.0.1:{{ coolify_app_port }}/api/health"

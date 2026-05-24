@@ -51,8 +51,6 @@ The `coolify` role includes restic backup support for every host in the
 ### Shared Coolify backup configuration
 
 - `group_vars/coolify/main.yml` enables backup by default for the whole group.
-- `group_vars/coolify/main.yml` also defaults `coolify_domain` to the inventory
-  hostname, so a new Coolify host answers on its own DNS name automatically.
 - `group_vars/coolify/main.yml` enables automatic localhost SSH bootstrap for
   Coolify and keeps primary-user key management non-exclusive on those hosts so
   the generated Coolify key is not stripped by the `maintain` role.
@@ -91,4 +89,4 @@ See the *How to onboard another Coolify host* section at the top of
 - Add the host to `[coolify]` in `inventory.ini`.
 - Run `hourly.yml`.
 - Only add `host_vars/<host>/main.yml` if that host needs exceptions such as
-  manual dump overrides, extra excludes, or a non-inventory Coolify domain.
+  manual dump overrides or extra excludes.

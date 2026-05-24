@@ -9,7 +9,6 @@ coolify_external_volume_names:
 coolify_cdn_url: https://cdn.coollabs.io/coolify
 
 coolify_app_name: Coolify
-coolify_domain: coolify.manitra.net
 coolify_registry_url: ghcr.io
 coolify_latest_image: latest
 
@@ -17,10 +16,6 @@ coolify_app_bind_address: 127.0.0.1
 coolify_app_port: 8083
 coolify_soketi_port: 6001
 coolify_soketi_metrics_port: 6002
-
-coolify_manage_caddy: true
-coolify_caddy_config_dir: /etc/caddy/conf.d
-coolify_caddy_config_path: "{{ coolify_caddy_config_dir }}/coolify.caddy"
 
 coolify_manage_localhost_ssh_bootstrap: false
 coolify_ssh_user: root
