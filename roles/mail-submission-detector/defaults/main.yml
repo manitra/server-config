@@ -1,0 +1,32 @@
+---
+mail_submission_detector_enabled: true
+
+mail_submission_detector_config_dir: /etc/mail-submission-detector
+mail_submission_detector_config_path: "{{ mail_submission_detector_config_dir }}/config.json"
+mail_submission_detector_script_path: /usr/local/sbin/mail-submission-detector
+mail_submission_detector_state_dir: /var/lib/mail-submission-detector
+mail_submission_detector_state_path: "{{ mail_submission_detector_state_dir }}/state.json"
+mail_submission_detector_cron_file: /etc/cron.d/mail-submission-detector
+
+mail_submission_detector_log_glob: /var/log/exim4/mainlog*
+mail_submission_detector_lookback_hours: 6
+mail_submission_detector_distinct_ip_threshold: 3
+mail_submission_detector_dmarc_lookup_enabled: true
+mail_submission_detector_fallback_alert_email: monitoring+mailabuse@manitra.net
+mail_submission_detector_from_address: "mail-monitor@{{ inventory_hostname }}"
+mail_submission_detector_cron_hour: "*"
+mail_submission_detector_cron_minute: "11"
+
+mail_submission_detector_ignore_cidrs: []
+
+# Per-client configuration.
+#
+# When this list is empty, the detector watches every authenticated sender
+# domain seen in Exim logs on the host.
+#
+# `domain` is required when adding an override.
+# `alert_email` is optional; when omitted the detector falls back to the
+# domain's DMARC rua mailbox when one is published, then finally to
+# `mail_submission_detector_fallback_alert_email`.
+# `use_dmarc_rua` defaults to true.
+mail_submission_detector_clients: []

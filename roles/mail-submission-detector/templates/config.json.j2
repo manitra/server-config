@@ -1,0 +1,12 @@
+{
+  "host_name": {{ inventory_hostname | to_json }},
+  "log_glob": {{ mail_submission_detector_log_glob | to_json }},
+  "lookback_hours": {{ mail_submission_detector_lookback_hours }},
+  "distinct_ip_threshold": {{ mail_submission_detector_distinct_ip_threshold }},
+  "state_path": {{ mail_submission_detector_state_path | to_json }},
+  "from_address": {{ mail_submission_detector_from_address | to_json }},
+  "fallback_alert_email": {{ mail_submission_detector_fallback_alert_email | to_json }},
+  "dmarc_lookup_enabled": {{ mail_submission_detector_dmarc_lookup_enabled | to_json }},
+  "ignore_cidrs": {{ mail_submission_detector_ignore_cidrs | to_json }},
+  "clients": {{ mail_submission_detector_clients | to_json }}
+}

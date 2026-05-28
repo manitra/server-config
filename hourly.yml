@@ -8,6 +8,10 @@
   roles:
     - hestia
 
+- hosts: mail_submission_detector
+  roles:
+    - mail-submission-detector
+
 - hosts: dotnet
   roles:
     - dotnet

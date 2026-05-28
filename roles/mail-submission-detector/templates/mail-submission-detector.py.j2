@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+
+import datetime as dt
+import glob
+import gzip
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+from email.message import EmailMessage
+
+
+CONFIG_PATH = {{ mail_submission_detector_config_path | to_json }}
+SENDMAIL_PATH = "/usr/sbin/sendmail"
+
+EVENT_RE = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) "
+    r"(?P<queue_id>\S+) <= (?P<sender>\S+) "
+    r"H=(?P<helo>.+?) \[(?P<ip>[0-9A-Fa-f:.]+)\] "
+    r"P=(?P<protocol>\S+) .* A=dovecot_[^:]+:(?P<auth_user>\S+)"
+)
+DMARC_RUA_RE = re.compile(r"(?:^|;)\s*rua=([^;]+)", re.IGNORECASE)
+MAILTO_RE = re.compile(r"mailto:([^,; ]+)", re.IGNORECASE)
+
+
+def load_config(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def iter_log_lines(path):
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            yield line.rstrip("\n")
+
+
+def parse_timestamp(value):
+    return dt.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+
+
+def build_ignored_networks(config):
+    networks = []
+    for cidr in config.get("ignore_cidrs", []):
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            print(f"Ignoring invalid CIDR in config: {cidr}", file=sys.stderr)
+    return networks
+
+
+def is_relevant_ip(ip_text, ignored_networks):
+    try:
+        ip_addr = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+
+    if not ip_addr.is_global:
+        return False
+
+    return not any(ip_addr in network for network in ignored_networks)
+
+
+def resolve_alert_email(domain, client_config, dmarc_lookup_enabled, fallback_email):
+    explicit = (client_config.get("alert_email") or "").strip()
+    if explicit:
+        return explicit
+
+    if not dmarc_lookup_enabled or client_config.get("use_dmarc_rua", True) is False:
+        return fallback_email
+
+    result = subprocess.run(
+        ["dig", "+short", "TXT", f"_dmarc.{domain}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+
+    txt_value = "".join(part.strip().strip('"') for part in result.stdout.splitlines())
+    rua_match = DMARC_RUA_RE.search(txt_value)
+    if not rua_match:
+        return fallback_email
+
+    mailto_match = MAILTO_RE.search(rua_match.group(1))
+    if not mailto_match:
+        return fallback_email
+
+    return mailto_match.group(1).strip()
+
+
+def collect_events(config):
+    now = dt.datetime.now()
+    cutoff = now - dt.timedelta(hours=int(config["lookback_hours"]))
+    ignored_networks = build_ignored_networks(config)
+    configured_clients = {
+        client["domain"].lower(): client
+        for client in config.get("clients", [])
+        if client.get("domain")
+    }
+    monitor_all_domains = not configured_clients
+
+    events_by_domain = {domain: {} for domain in configured_clients}
+
+    for path in sorted(glob.glob(config["log_glob"])):
+        for line in iter_log_lines(path):
+            match = EVENT_RE.match(line)
+            if not match:
+                continue
+
+            protocol = match.group("protocol")
+            if not protocol.startswith("esmtpsa") and protocol != "esmtpa":
+                continue
+
+            timestamp = parse_timestamp(match.group("timestamp"))
+            if timestamp < cutoff:
+                continue
+
+            auth_user = match.group("auth_user").lower()
+            if "@" not in auth_user:
+                continue
+
+            domain = auth_user.rsplit("@", 1)[1]
+            if not monitor_all_domains and domain not in configured_clients:
+                continue
+
+            ip_text = match.group("ip")
+            if not is_relevant_ip(ip_text, ignored_networks):
+                continue
+
+            mailbox_events = events_by_domain[domain].setdefault(auth_user, [])
+            mailbox_events.append(
+                {
+                    "timestamp": timestamp,
+                    "queue_id": match.group("queue_id"),
+                    "sender": match.group("sender").lower(),
+                    "auth_user": auth_user,
+                    "ip": ip_text,
+                    "helo": match.group("helo"),
+                }
+            )
+
+    detections = {}
+    threshold = int(config["distinct_ip_threshold"])
+    for domain, mailbox_map in events_by_domain.items():
+        suspicious_mailboxes = []
+        for mailbox, events in mailbox_map.items():
+            distinct_ips = sorted({event["ip"] for event in events})
+            if len(distinct_ips) < threshold:
+                continue
+
+            suspicious_mailboxes.append(
+                {
+                    "mailbox": mailbox,
+                    "distinct_ips": distinct_ips,
+                    "events": sorted(events, key=lambda item: item["timestamp"]),
+                }
+            )
+
+        if suspicious_mailboxes:
+            detections[domain] = suspicious_mailboxes
+
+    return detections, configured_clients
+
+
+def load_state(path):
+    if not os.path.exists(path):
+        return {}
+
+    with open(path, "r", encoding="utf-8") as handle:
+        try:
+            return json.load(handle)
+        except json.JSONDecodeError:
+            return {}
+
+
+def save_state(path, state):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2, sort_keys=True)
+
+
+def detection_signature(mailboxes):
+    payload = []
+    for mailbox in mailboxes:
+        payload.append(
+            {
+                "mailbox": mailbox["mailbox"],
+                "distinct_ips": mailbox["distinct_ips"],
+                "latest_timestamp": mailbox["events"][-1]["timestamp"].isoformat(),
+            }
+        )
+    return json.dumps(payload, sort_keys=True)
+
+
+def format_body(config, domain, mailboxes, alert_email):
+    lines = [
+        f"Host: {config['host_name']}",
+        f"Domain: {domain}",
+        f"Alert recipient: {alert_email}",
+        f"Window: last {config['lookback_hours']} hours",
+        f"Threshold: {config['distinct_ip_threshold']} distinct public SMTP source IPs",
+        "",
+        "The following authenticated mailbox submissions crossed the threshold:",
+        "",
+    ]
+
+    for mailbox in sorted(mailboxes, key=lambda item: item["mailbox"]):
+        lines.append(f"Mailbox: {mailbox['mailbox']}")
+        lines.append(f"Distinct IP count: {len(mailbox['distinct_ips'])}")
+        lines.append(f"Distinct IPs: {', '.join(mailbox['distinct_ips'])}")
+        lines.append("Recent events:")
+        for event in mailbox["events"][-10:]:
+            lines.append(
+                "  - {timestamp} | {ip} | auth={auth_user} | sender={sender} | "
+                "queue={queue_id} | helo={helo}".format(
+                    timestamp=event["timestamp"].strftime("%Y-%m-%d %H:%M:%S"),
+                    ip=event["ip"],
+                    auth_user=event["auth_user"],
+                    sender=event["sender"],
+                    queue_id=event["queue_id"],
+                    helo=event["helo"],
+                )
+            )
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def send_email(from_address, to_address, subject, body):
+    message = EmailMessage()
+    message["From"] = from_address
+    message["To"] = to_address
+    message["Subject"] = subject
+    message.set_content(body)
+
+    subprocess.run(
+        [SENDMAIL_PATH, "-t", "-oi"],
+        check=True,
+        input=message.as_bytes(),
+        capture_output=True,
+    )
+
+
+def main():
+    config = load_config(CONFIG_PATH)
+    detections, configured_clients = collect_events(config)
+    state = load_state(config["state_path"])
+    next_state = {}
+
+    for domain, mailboxes in detections.items():
+        client_config = configured_clients.get(domain, {"domain": domain})
+        alert_email = resolve_alert_email(
+            domain,
+            client_config,
+            config.get("dmarc_lookup_enabled", True),
+            config.get("fallback_alert_email", ""),
+        )
+        if not alert_email:
+            print(
+                f"No alert recipient for {domain}; set alert_email or publish DMARC rua",
+                file=sys.stderr,
+            )
+            continue
+
+        signature = detection_signature(mailboxes)
+        next_state[domain] = signature
+        if state.get(domain) == signature:
+            continue
+
+        subject = (
+            f"[{config['host_name']}] suspicious SMTP submissions for {domain}"
+        )
+        body = format_body(config, domain, mailboxes, alert_email)
+        send_email(config["from_address"], alert_email, subject, body)
+
+    save_state(config["state_path"], next_state)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        print(stderr or str(exc), file=sys.stderr)
+        raise
