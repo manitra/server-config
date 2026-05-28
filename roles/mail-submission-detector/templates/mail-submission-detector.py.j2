@@ -131,7 +131,8 @@ def collect_events(config):
             if not is_relevant_ip(ip_text, ignored_networks):
                 continue
 
-            mailbox_events = events_by_domain[domain].setdefault(auth_user, [])
+            domain_events = events_by_domain.setdefault(domain, {})
+            mailbox_events = domain_events.setdefault(auth_user, [])
             mailbox_events.append(
                 {
                     "timestamp": timestamp,

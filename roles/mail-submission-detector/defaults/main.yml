@@ -9,7 +9,7 @@ mail_submission_detector_state_path: "{{ mail_submission_detector_state_dir }}/s
 mail_submission_detector_cron_file: /etc/cron.d/mail-submission-detector
 
 mail_submission_detector_log_glob: /var/log/exim4/mainlog*
-mail_submission_detector_lookback_hours: 6
+mail_submission_detector_lookback_hours: 24
 mail_submission_detector_distinct_ip_threshold: 3
 mail_submission_detector_dmarc_lookup_enabled: true
 mail_submission_detector_fallback_alert_email: monitoring+mailabuse@manitra.net
