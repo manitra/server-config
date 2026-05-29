@@ -35,6 +35,7 @@ hestia_install_flags:
 hestia_fail2ban_ignore_file: /etc/fail2ban/jail.d/98-trusted-client-ips.local
 hestia_fail2ban_ignore_ips: []
 hestia_fail2ban_ignore_legacy_files: []
+hestia_mail_ssl_config_repair_enabled: true
 
 # Hestia Exim uses SpamAssassin integer scores scaled by 10.
 # 20.0 in SpamAssassin terms becomes SPAM_REJECT_SCORE = 200.

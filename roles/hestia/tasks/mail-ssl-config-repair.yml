@@ -1,0 +1,65 @@
+---
+- name: "Check whether Hestia mail system is enabled"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Eq
+      - '^MAIL_SYSTEM=[''\"]?exim4[''\"]?$'
+      - /usr/local/hestia/conf/hestia.conf
+  register: hestia_mail_ssl_config_mail_system_check
+  changed_when: false
+  failed_when: false
+  when: hestia_mail_ssl_config_repair_enabled | bool
+
+- name: "Check whether Hestia mail webmail repair command exists"
+  become: true
+  ansible.builtin.stat:
+    path: /usr/local/hestia/bin/v-add-mail-domain-webmail
+  register: hestia_mail_ssl_config_repair_command
+  when:
+    - hestia_mail_ssl_config_repair_enabled | bool
+    - hestia_mail_ssl_config_mail_system_check.rc == 0
+
+- name: "List SSL-enabled Hestia mail domains with webmail"
+  become: true
+  ansible.builtin.shell: |
+    set -eu
+    find /usr/local/hestia/data/users -mindepth 2 -maxdepth 2 -name mail.conf -print | while IFS= read -r mail_conf; do
+      user="$(basename "$(dirname "$mail_conf")")"
+      grep " SSL='yes'" "$mail_conf" | grep -v " WEBMAIL=''" | sed -n "s/^DOMAIN='\\([^']*\\)'.*/$user\\	\\1/p"
+    done
+  args:
+    executable: /bin/bash
+  register: hestia_mail_ssl_config_domains
+  changed_when: false
+  when:
+    - hestia_mail_ssl_config_repair_enabled | bool
+    - hestia_mail_ssl_config_mail_system_check.rc == 0
+    - hestia_mail_ssl_config_repair_command.stat.exists | default(false)
+
+- name: "Repair missing Hestia mail SSL nginx configs"
+  become: true
+  ansible.builtin.shell: |
+    set -eu
+    user={{ item.split('\t')[0] | quote }}
+    domain={{ item.split('\t')[1] | quote }}
+    source_config="/home/$user/conf/mail/$domain/nginx.ssl.conf"
+    live_config="/etc/nginx/conf.d/domains/webmail.$domain.ssl.conf"
+
+    if [[ -f "$source_config" && -L "$live_config" ]]; then
+      exit 0
+    fi
+
+    /usr/local/hestia/bin/v-add-mail-domain-webmail "$user" "$domain" webmail yes
+    [[ -f "$source_config" && -L "$live_config" ]]
+    echo repaired
+  args:
+    executable: /bin/bash
+  loop: "{{ hestia_mail_ssl_config_domains.stdout_lines | reject('equalto', '') | list }}"
+  register: hestia_mail_ssl_config_repairs
+  changed_when: "'repaired' in stdout"
+  when:
+    - hestia_mail_ssl_config_repair_enabled | bool
+    - hestia_mail_ssl_config_mail_system_check.rc == 0
+    - hestia_mail_ssl_config_repair_command.stat.exists | default(false)
