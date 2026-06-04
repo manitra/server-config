@@ -25,3 +25,8 @@ hestia_install_flags:
   lang: 'en'
 
 hestia_restic_recovery_key_manage: true
+
+ufw_extra_allow_rules:
+  - port: '8083'
+    proto: tcp
+    comment: 'HestiaCP control panel'
