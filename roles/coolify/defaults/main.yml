@@ -98,6 +98,18 @@ coolify_restic_backup_cron_hour: "3"
 coolify_restic_backup_cron_minute: "17"
 
 # Recovery-key management (mirrors hestia_restic_recovery_key_manage).
+coolify_restic_recovery_key_file: /etc/restic/coolify-recovery.key
+
+# ── fail2ban for Coolify auth hardening ────────────────────────────────────────
+# Watches Traefik access logs for brute-force on /login and API 401/403.
+coolify_fail2ban_enabled: true
+coolify_fail2ban_backend: polling
+coolify_fail2ban_filter_name: coolify-auth
+coolify_fail2ban_logpath: "{{ coolify_base_dir }}/proxy/access.log"
+coolify_fail2ban_maxretry: 5
+coolify_fail2ban_findtime: 300
+coolify_fail2ban_bantime: 600
+coolify_fail2ban_ignoreip: 127.0.0.0/8 172.20.0.0/16 10.0.0.0/8 192.168.0.0/16
 # When true, Ansible ensures a labeled recovery key is present in the repo so
 # the repository can be unlocked with coolify_restic_recovery_password without
 # needing the operational password.

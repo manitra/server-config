@@ -1,0 +1,83 @@
+---
+# ── Coolify fail2ban hardening ─────────────────────────────────────────────────
+# Monitors Traefik JSON access logs for:
+#   • POST /login (any status – brute-force detection)
+#   • /api/* returning 401 or 403 (API auth failures)
+#
+# Requires Traefik access logging enabled on the coolify-proxy container.
+
+- name: "[coolify fail2ban] Ensure fail2ban is installed"
+  package:
+    name: fail2ban
+    state: present
+
+- name: "[coolify fail2ban] Ensure fail2ban is running"
+  service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+- name: "[coolify fail2ban] Enable Traefik JSON access log in proxy compose"
+  block:
+    - name: "[coolify fail2ban] Check if access log already enabled"
+      command: grep -q 'accesslog' "{{ coolify_base_dir }}/proxy/docker-compose.yml"
+      register: _cf2b_log_check
+      changed_when: false
+      failed_when: false
+
+    - name: "[coolify fail2ban] Add access log args to proxy compose"
+      shell: |
+        set -euo pipefail
+        file="{{ coolify_base_dir }}/proxy/docker-compose.yml"
+        cp "$file" "$file.bak-$(date +%s)"
+        sed -i "/--providers.docker.exposedbydefault=false/a\      - '--accesslog=true'\n      - '--accesslog.filepath=/traefik/access.log'\n      - '--accesslog.format=json'" "$file"
+      when: _cf2b_log_check.rc != 0
+
+    - name: "[coolify fail2ban] Restart proxy to apply access logging"
+      command:
+        cmd: docker compose up -d traefik
+        chdir: "{{ coolify_base_dir }}/proxy"
+      changed_when: true
+      when: _cf2b_log_check.rc != 0
+  when: coolify_fail2ban_enabled | bool
+
+- name: "[coolify fail2ban] Deploy fail2ban filter"
+  copy:
+    dest: "/etc/fail2ban/filter.d/{{ coolify_fail2ban_filter_name }}.conf"
+    content: |
+      # Coolify auth brute-force filter
+      # Reads Traefik JSON access logs.
+      # Matches: any request to /login (GET+POST, brute-force detection)
+      #          and API calls returning 401/403.
+      [Definition]
+      _host = [0-9a-fA-F.:]+
+      prefregex = ^<F-MLFID>(.*)</F-MLFID>$
+      failregex = "ClientHost":"<HOST>".*"RequestPath":"/login"
+                  "ClientHost":"<HOST>".*"RequestPath":"/api/[^"]*".*"DownstreamStatus":(401|403)
+      ignoreregex =
+      datepattern = {DATE}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart fail2ban
+  when: coolify_fail2ban_enabled | bool
+
+- name: "[coolify fail2ban] Deploy fail2ban jail"
+  copy:
+    dest: "/etc/fail2ban/jail.d/{{ coolify_fail2ban_filter_name }}.conf"
+    content: |
+      [{{ coolify_fail2ban_filter_name }}]
+      enabled  = true
+      backend  = {{ coolify_fail2ban_backend }}
+      port     = http,https
+      filter   = {{ coolify_fail2ban_filter_name }}
+      logpath  = {{ coolify_fail2ban_logpath }}
+      maxretry = {{ coolify_fail2ban_maxretry }}
+      findtime = {{ coolify_fail2ban_findtime }}
+      bantime  = {{ coolify_fail2ban_bantime }}
+      ignoreip = {{ coolify_fail2ban_ignoreip }}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart fail2ban
+  when: coolify_fail2ban_enabled | bool
