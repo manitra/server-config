@@ -46,7 +46,7 @@
 # How to onboard another Coolify host
 # ------------------------------------
 #   1. Add the host to [coolify] in inventory.ini.
-#   2. Run hourly.yml (or target the coolify role directly).
+#   2. Run daily.yml (or target the coolify role directly).
 #   3. Add host_vars/<host>/main.yml only for exceptions such as extra excludes,
 #      custom dump definitions, or a non-default public Coolify domain.
 
