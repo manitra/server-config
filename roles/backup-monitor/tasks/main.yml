@@ -1,0 +1,161 @@
+---
+# backup-monitor tasks
+# ====================
+# Auto-discovers Hestia restic repos on the backup host, checks snapshot
+# freshness, and runs periodic integrity checks.
+
+- name: "Assert recovery password is configured"
+  ansible.builtin.assert:
+    that:
+      - backup_monitor_restic_password | length > 0
+    fail_msg: >-
+      backup_monitor_restic_password must be set (playbook vars or
+      group_vars/backup_monitor/vault.yml). Use the same recovery
+      passphrase stored in group_vars/hestia/vault.yml.
+
+- name: "Discover Hestia backup host directories"
+  ansible.builtin.find:
+    paths: "{{ backup_monitor_base_path }}"
+    file_type: directory
+    recurse: false
+  register: backup_monitor_host_dirs
+
+- name: "Filter host directories"
+  ansible.builtin.set_fact:
+    backup_monitor_active_hosts: >-
+      {{
+        backup_monitor_host_dirs.files
+        | map(attribute='path')
+        | map('basename')
+        | reject('in', backup_monitor_skip_dirs)
+        | list
+      }}
+
+- name: "Discover restic repos per host"
+  ansible.builtin.find:
+    paths: "{{ backup_monitor_base_path }}/{{ item }}"
+    patterns: "restic-*"
+    file_type: directory
+    recurse: false
+  loop: "{{ backup_monitor_active_hosts }}"
+  register: backup_monitor_per_host_repos
+
+- name: "Build repo inventory"
+  ansible.builtin.set_fact:
+    backup_monitor_repos: >-
+      {{
+        backup_monitor_repos | default([])
+        +
+        repos_for_host
+      }}
+  vars:
+    repos_for_host: >-
+      {{
+        item.files
+        | map(attribute='path')
+        | map('regex_replace', '^' ~ (backup_monitor_base_path | regex_escape) ~ '/', '')
+        | list
+      }}
+  loop: "{{ backup_monitor_per_host_repos.results }}"
+  when: item.files | length > 0
+
+- name: "Show discovered repos"
+  ansible.builtin.debug:
+    msg: "Found {{ backup_monitor_repos | length }} restic repos to check"
+
+- name: "Check snapshot freshness for each repo"
+  become: true
+  ansible.builtin.shell: |
+    set -o pipefail
+    restic -r "{{ backup_monitor_base_path }}/{{ item }}" \
+      --password-command 'echo {{ backup_monitor_restic_password }}' \
+      snapshots --latest 1 2>&1 \
+      | grep -E '^[a-f0-9]' \
+      | awk '{print $2, $3}'
+  loop: "{{ backup_monitor_repos }}"
+  register: backup_monitor_snapshot_dates
+  changed_when: false
+  failed_when: false
+
+- name: "Parse snapshot dates and check staleness"
+  ansible.builtin.set_fact:
+    backup_monitor_stale_repos: >-
+      {{
+        backup_monitor_stale_repos | default([])
+        +
+        [{
+          'repo': item.item,
+          'last_snapshot': item.stdout | trim,
+          'age_hours': ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
+                         - (item.stdout | trim | to_datetime('%Y-%m-%d %H:%M:%S') | regex_replace(' ', 'T') ~ '+03:00')
+                        ).total_seconds() / 3600 ) | round(1)
+        }]
+      }}
+  loop: "{{ backup_monitor_snapshot_dates.results }}"
+  when:
+    - item.stdout | trim | length > 0
+    - >-
+      ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
+         - (item.stdout | trim | to_datetime('%Y-%m-%d %H:%M:%S') | regex_replace(' ', 'T') ~ '+03:00')
+        ).total_seconds() / 3600 ) > (backup_monitor_staleness_hours | float)
+
+- name: "Collect repos with no snapshots"
+  ansible.builtin.set_fact:
+    backup_monitor_empty_repos: >-
+      {{
+        backup_monitor_snapshot_dates.results
+        | rejectattr('stdout', 'regex', '^[a-f0-9]')
+        | map(attribute='item')
+        | list
+      }}
+
+- name: "Report snapshot staleness"
+  ansible.builtin.debug:
+    msg: >-
+      {% if backup_monitor_stale_repos | length > 0 %}
+      STALE REPOS (>{{ backup_monitor_staleness_hours }}h since last snapshot):
+      {% for r in backup_monitor_stale_repos %}
+        {{ r.repo }}  last: {{ r.last_snapshot }}  ({{ r.age_hours }}h ago)
+      {% endfor %}
+      {% else %}
+      All repos have fresh snapshots.
+      {% endif %}
+      {% if backup_monitor_empty_repos | length > 0 %}
+      EMPTY/MISSING REPOS:
+      {% for r in backup_monitor_empty_repos %}
+        {{ r }}
+      {% endfor %}
+      {% endif %}
+
+- name: "Fail on stale snapshots (strict mode)"
+  ansible.builtin.fail:
+    msg: >-
+      {{ backup_monitor_stale_repos | length }} repo(s) have stale snapshots
+      and {{ backup_monitor_empty_repos | length }} repo(s) have no snapshots.
+      Run daily.yml on the affected Hestia hosts.
+  when:
+    - backup_monitor_strict_staleness | bool
+    - (backup_monitor_stale_repos | length > 0) or (backup_monitor_empty_repos | length > 0)
+
+- name: "Run restic check on each repo"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - restic
+      - -r
+      - "{{ backup_monitor_base_path }}/{{ item }}"
+      - --password-command
+      - echo {{ backup_monitor_restic_password }}
+      - check
+      - --read-data-subset={{ backup_monitor_check_read_fraction }}
+    timeout: "{{ backup_monitor_check_timeout }}"
+  loop: "{{ backup_monitor_repos }}"
+  register: backup_monitor_check_results
+  changed_when: false
+
+- name: "Report restic check failures"
+  ansible.builtin.fail:
+    msg: >-
+      restic check failed for {{ item.item }}: {{ item.stderr_lines | default(item.msg) }}
+  loop: "{{ backup_monitor_check_results.results }}"
+  when: item.failed | default(false)

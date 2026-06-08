@@ -1,0 +1,15 @@
+---
+# Weekly backup integrity checks
+# ==============================
+# Runs every Sunday. Targets the backup host (vps06) and:
+#   1. Checks every Hestia restic repo for stale snapshots
+#   2. Runs restic check --read-data-subset=1% on every repo
+#
+# The recovery password is inherited from group_vars/hestia/vault.yml
+# because vps06 belongs to the 'hestia' group.
+
+- hosts: backup_monitor
+  vars:
+    backup_monitor_restic_password: "{{ hestia_restic_recovery_password }}"
+  roles:
+    - backup-monitor

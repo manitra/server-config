@@ -1,0 +1,33 @@
+---
+# backup-monitor: staleness detection and integrity checks for restic repos.
+#
+# Runs on the backup host (vps06). Auto-discovers Hestia backup directories
+# under the base path, then for each restic-* repo:
+#   1. Checks the latest snapshot age (fails if > staleness threshold)
+#   2. Runs `restic check --read-data-subset=1%` for lightweight integrity
+#
+# Requires the recovery password for repo access. Set via:
+#   group_vars/backup_monitor/vault.yml  or  playbook vars.
+
+backup_monitor_base_path: /home/backuper/backup
+
+# Maximum hours since last snapshot before alerting.
+backup_monitor_staleness_hours: 28
+
+# Timeout per repo for restic check (seconds).
+backup_monitor_check_timeout: 1800
+
+# Fraction of pack data to verify during check (0 = structure only).
+# 1% is a good balance: catches corruption without hours of I/O.
+backup_monitor_check_read_fraction: 1%
+
+# Restic repository password (recovery key passphrase).
+# Must be set via playbook vars or group_vars/backup_monitor/vault.yml.
+backup_monitor_restic_password: ""
+
+# Host directories under base_path to skip (e.g., non-Hestia backups).
+backup_monitor_skip_dirs:
+  - vps11            # Coolify backup, different password scheme
+
+# If false, stale snapshots produce warnings only (don't fail the playbook).
+backup_monitor_strict_staleness: true
