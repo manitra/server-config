@@ -42,8 +42,8 @@
   become: true
   ansible.builtin.shell: |
     set -eu
-    user={{ item.split('\t')[0] | quote }}
-    domain={{ item.split('\t')[1] | quote }}
+    user={{ item.split("\t")[0] | quote }}
+    domain={{ item.split("\t")[1] | quote }}
     source_config="/home/$user/conf/mail/$domain/nginx.ssl.conf"
     live_config="/etc/nginx/conf.d/domains/webmail.$domain.ssl.conf"
 
