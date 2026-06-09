@@ -42,8 +42,9 @@
   become: true
   ansible.builtin.shell: |
     set -eu
-    user={{ item.split("\t")[0] | quote }}
-    domain={{ item.split("\t")[1] | quote }}
+    line={{ item | quote }}
+    user="${line%%	*}"
+    domain="${line##*	}"
     source_config="/home/$user/conf/mail/$domain/nginx.ssl.conf"
     live_config="/etc/nginx/conf.d/domains/webmail.$domain.ssl.conf"
 
@@ -58,7 +59,7 @@
     executable: /bin/bash
   loop: "{{ hestia_mail_ssl_config_domains.stdout_lines | reject('equalto', '') | list }}"
   register: hestia_mail_ssl_config_repairs
-  changed_when: "'repaired' in stdout"
+  changed_when: "'repaired' in stdout|default('')"
   when:
     - hestia_mail_ssl_config_repair_enabled | bool
     - hestia_mail_ssl_config_mail_system_check.rc == 0
