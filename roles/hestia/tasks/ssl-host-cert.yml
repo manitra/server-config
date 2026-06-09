@@ -1,0 +1,24 @@
+---
+- name: "Ensure ISRG Root YR is installed in system CA store"
+  become: true
+  ansible.builtin.copy:
+    src: isrg-root-yr.crt
+    dest: /usr/local/share/ca-certificates/isrg-root-yr.crt
+    owner: root
+    group: root
+    mode: "0644"
+  register: isrg_root_yr_cert
+
+- name: "Update CA certificates if Root YR was newly installed"
+  become: true
+  ansible.builtin.command:
+    cmd: update-ca-certificates --fresh
+  when: isrg_root_yr_cert is changed
+  changed_when: false
+
+- name: "Generate Let's Encrypt host certificate"
+  become: true
+  ansible.builtin.command:
+    cmd: /usr/local/hestia/bin/v-add-letsencrypt-host
+  when: hestia_generate_ssl | bool
+  changed_when: false

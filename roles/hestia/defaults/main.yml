@@ -37,6 +37,9 @@ hestia_fail2ban_ignore_ips: []
 hestia_fail2ban_ignore_legacy_files: []
 hestia_mail_ssl_config_repair_enabled: true
 
+# Whether to generate a Let's Encrypt cert for the server hostname
+hestia_generate_ssl: false
+
 # Hestia Exim uses SpamAssassin integer scores scaled by 10.
 # 20.0 in SpamAssassin terms becomes SPAM_REJECT_SCORE = 200.
 hestia_spam_reject_score: 20.0

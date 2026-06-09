@@ -4,6 +4,9 @@
 - name: "Install HestiaCP"
   import_tasks: install.yml
 
+- name: "Ensure ISRG Root YR is trusted and generate host SSL"
+  import_tasks: ssl-host-cert.yml
+
 - name: "Repair missing mail SSL configs"
   import_tasks: mail-ssl-config-repair.yml
 

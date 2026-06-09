@@ -1,4 +1,7 @@
 ---
+server_hostname: hestia.app.gov.mg
+hestia_generate_ssl: true
+
 hestia_fail2ban_ignore_ips:
   - name: UGD
     ip: 102.16.56.58
