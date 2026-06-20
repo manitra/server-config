@@ -1,6 +1,8 @@
 A:
   - record: vps03
     value: 51.75.203.179
+  - record: vps04
+    value: 51.83.75.177
   - record: vps06
     value : 5.135.152.108
   - record: vps11
