@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: manitra
+  description: Prepare a server to act as a Coolify worker (Docker + SSH key)
+  license: MIT
+  min_ansible_version: "2.9"
+dependencies: []

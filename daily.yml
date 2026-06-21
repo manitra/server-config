@@ -38,6 +38,10 @@
   roles:
     - coolify
 
+- hosts: coolify_worker
+  roles:
+    - coolify_worker
+
 - hosts: imgproc
   roles:
     - img-proc

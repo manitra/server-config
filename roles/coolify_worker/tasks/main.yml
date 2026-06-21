@@ -1,0 +1,46 @@
+---
+# ── coolify_worker role tasks ─────────────────────────────────────────────────
+# Prepares a remote server to act as a Coolify worker:
+#   1. Installs Docker + Compose V2 (the master manages containers remotely).
+#   2. Ensures the SSH user exists with a home directory.
+#   3. Authorizes the Coolify master's SSH public key so the master can connect.
+#
+# The master must be in the [coolify] inventory group and already set up
+# (its SSH key file at coolify_worker_master_key_pub must exist).
+
+- name: Install Docker engine
+  apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+
+- name: Ensure SSH user exists
+  user:
+    name: "{{ coolify_worker_ssh_user }}"
+    state: present
+    shell: /bin/bash
+    create_home: true
+
+- name: Ensure SSH user .ssh directory exists
+  file:
+    path: "~{{ coolify_worker_ssh_user }}/.ssh"
+    state: directory
+    owner: "{{ coolify_worker_ssh_user }}"
+    group: "{{ coolify_worker_ssh_user }}"
+    mode: "0700"
+
+- name: Read Coolify master SSH public key
+  slurp:
+    src: "{{ coolify_worker_master_key_pub }}"
+  delegate_to: "{{ groups['coolify'][0] }}"
+  register: _cw_master_pubkey
+
+- name: Authorize Coolify master SSH key
+  authorized_key:
+    user: "{{ coolify_worker_ssh_user }}"
+    key: "{{ _cw_master_pubkey.content | b64decode }}"
+    comment: coolify-master
+    state: present
+  no_log: true

@@ -224,3 +224,7 @@
 
 - name: "Configure restic backup"
   import_tasks: backup.yml
+
+- name: "Register Coolify workers via API"
+  import_tasks: workers.yml
+  when: groups['coolify_worker'] | default([]) | length > 0

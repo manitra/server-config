@@ -1,0 +1,115 @@
+---
+# ── Coolify worker registration ───────────────────────────────────────────────
+# Runs on the Coolify master host. For each host in the [coolify_worker]
+# inventory group this task file:
+#   1. Ensures a Coolify API token exists (auto-generated via artisan if absent).
+#   2. Looks up the private key UUID that Coolify already uses for SSH.
+#   3. Creates the server in Coolify via POST /api/v1/servers if it does not
+#      already exist.
+#
+# The SSH public key must already be authorized on the worker before these tasks
+# run (handled by the coolify_worker play in daily.yml).
+
+- name: "[worker] Ensure API token directory exists"
+  file:
+    path: "{{ coolify_worker_api_token_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "[worker] Check for existing API token"
+  stat:
+    path: "{{ coolify_worker_api_token_file }}"
+  register: _cw_token_stat
+
+- name: "[worker] Generate API token via Coolify artisan"
+  shell: |
+    set -euo pipefail
+    cd "{{ coolify_source_dir }}"
+    docker compose exec -T coolify php artisan tinker --execute='$user = App\Models\User::where("id", 0)->first(); if ($user === null) { echo "ERROR: no root user\n"; exit(1); } $token = $user->createToken("'"{{ coolify_worker_api_token_name }}"'", ["write"]); echo $token->plainTextToken;'
+  register: _cw_token_gen
+  changed_when: true
+  no_log: true
+  when: not _cw_token_stat.stat.exists
+
+- name: "[worker] Persist generated API token"
+  copy:
+    content: "{{ _cw_token_gen.stdout_lines[-1] }}"
+    dest: "{{ coolify_worker_api_token_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when:
+    - not _cw_token_stat.stat.exists
+    - _cw_token_gen is succeeded
+
+- name: "[worker] Read API token"
+  slurp:
+    src: "{{ coolify_worker_api_token_file }}"
+  register: _cw_token_slurp
+  no_log: true
+
+- name: "[worker] Set API token fact"
+  set_fact:
+    _coolify_api_token: "{{ _cw_token_slurp.content | b64decode | trim }}"
+  no_log: true
+
+- name: "[worker] Look up private key UUID"
+  shell: |
+    set -euo pipefail
+    cd "{{ coolify_source_dir }}"
+    docker compose exec -T coolify php artisan tinker --execute='$key = App\Models\PrivateKey::where("team_id", 0)->where("id", "!=", 0)->orderBy("id")->first(); if ($key === null) { echo "ERROR: no private key\n"; exit(1); } echo $key->uuid;'
+  register: _cw_key_uuid
+  changed_when: false
+
+- name: "[worker] Set private key UUID fact"
+  set_fact:
+    _coolify_private_key_uuid: "{{ _cw_key_uuid.stdout_lines[-1] | trim }}"
+
+- name: "[worker] Discover existing Coolify servers"
+  uri:
+    url: "http://127.0.0.1:{{ coolify_app_port }}/api/v1/servers"
+    headers:
+      Authorization: "Bearer {{ _coolify_api_token }}"
+    status_code: 200
+  register: _cw_existing_servers
+  changed_when: false
+
+- name: "[worker] Build existing server IP set"
+  set_fact:
+    _cw_existing_ips: "{{ _cw_existing_servers.json | default([]) | map(attribute='ip') | list }}"
+
+- name: "[worker] Register each worker in Coolify"
+  uri:
+    url: "http://127.0.0.1:{{ coolify_app_port }}/api/v1/servers"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _coolify_api_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "{{ hostvars[item].get('coolify_worker_name', item.split('.')[0]) }}"
+      description: "{{ hostvars[item].get('coolify_worker_description', 'Managed by Ansible') }}"
+      ip: "{{ hostvars[item].get('coolify_worker_ip', item) }}"
+      port: "{{ hostvars[item].get('coolify_worker_ssh_port', 22) | int }}"
+      user: "{{ hostvars[item].get('coolify_worker_ssh_user', 'root') }}"
+      private_key_uuid: "{{ _coolify_private_key_uuid }}"
+      is_build_server: "{{ hostvars[item].get('coolify_worker_is_build_server', false) | bool }}"
+      instant_validate: "{{ hostvars[item].get('coolify_worker_instant_validate', true) | bool }}"
+      proxy_type: "{{ hostvars[item].get('coolify_worker_proxy_type', 'traefik') }}"
+    status_code: [201, 400]
+  register: _cw_register
+  loop: "{{ groups['coolify_worker'] | default([]) }}"
+  when:
+    - item not in _cw_existing_ips
+    - hostvars[item].get('coolify_worker_ip', item) not in _cw_existing_ips
+  no_log: true
+
+- name: "[worker] Report already-registered workers"
+  debug:
+    msg: "Worker {{ item }} is already registered in Coolify, skipping."
+  loop: "{{ groups['coolify_worker'] | default([]) }}"
+  when:
+    - item in _cw_existing_ips or hostvars[item].get('coolify_worker_ip', item) in _cw_existing_ips

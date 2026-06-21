@@ -1,0 +1,25 @@
+---
+# ── coolify_worker role defaults ──────────────────────────────────────────────
+# Workers are remote servers that the Coolify master deploys applications to.
+# This role handles Docker installation, SSH user setup, and authorizing the
+# Coolify master's SSH public key so the master can connect and manage the host.
+#
+# Group-level overrides live in group_vars/coolify_worker/main.yml.
+# Host-level overrides live in host_vars/<host>/main.yml.
+
+# ── SSH ───────────────────────────────────────────────────────────────────────
+# The SSH user Coolify will connect as to manage this worker.
+coolify_worker_ssh_user: root
+coolify_worker_ssh_port: 22
+
+# Path to the Coolify master's SSH public key. The master generates this key at
+# /data/coolify/ssh/keys/id.<user>@host.docker.internal during its own setup.
+coolify_worker_master_key_pub: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+
+# ── Metadata shown in the Coolify UI ──────────────────────────────────────────
+coolify_worker_name: "{{ inventory_hostname.split('.')[0] }}"
+coolify_worker_ip: "{{ inventory_hostname }}"
+coolify_worker_description: "Managed by Ansible"
+coolify_worker_is_build_server: false
+coolify_worker_instant_validate: true
+coolify_worker_proxy_type: traefik

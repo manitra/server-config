@@ -1,0 +1,23 @@
+---
+# group_vars/coolify_worker/main.yml
+# ===================================
+# Variables that apply to every host in the [coolify_worker] inventory group.
+#
+# Workers are remote servers managed by the Coolify master. They need:
+#   - Docker installed (handled by the coolify_worker play in daily.yml)
+#   - The Coolify master's SSH public key in authorized_keys
+#   - No other Coolify-specific software (the master handles everything remotely)
+#
+# Override per-host settings in host_vars/<host>/main.yml.
+
+# SSH user that Coolify uses to connect to this worker.
+coolify_worker_ssh_user: root
+coolify_worker_ssh_port: 22
+
+# Server metadata shown in the Coolify UI.
+coolify_worker_name: "{{ inventory_hostname.split('.')[0] }}"
+coolify_worker_ip: "{{ inventory_hostname }}"
+coolify_worker_description: "Managed by Ansible"
+coolify_worker_is_build_server: false
+coolify_worker_instant_validate: true
+coolify_worker_proxy_type: traefik

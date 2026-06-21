@@ -117,3 +117,10 @@ coolify_restic_recovery_key_manage: false
 coolify_restic_recovery_key_user: ansible-recovery
 coolify_restic_recovery_key_host: "{{ inventory_hostname }}"
 coolify_restic_recovery_password: ""
+
+# ── Worker API integration (master-side) ──────────────────────────────────────
+# Used by tasks/workers.yml to auto-generate an API token and register workers
+# via the Coolify REST API. Worker metadata and SSH settings are defined in
+# group_vars/coolify_worker/main.yml (accessible to both master and worker roles).
+coolify_worker_api_token_file: /etc/coolify/worker-api-token
+coolify_worker_api_token_name: ansible-worker-management
