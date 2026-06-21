@@ -23,14 +23,36 @@
     path: "{{ coolify_worker_api_token_file }}"
   register: _cw_token_stat
 
-- name: "[worker] Generate API token via Coolify artisan"
-  shell: |
-    set -euo pipefail
-    cd "{{ coolify_source_dir }}"
-    docker compose exec -T coolify php artisan tinker --execute='$user = App\Models\User::where("id", 0)->first(); if ($user === null) { echo "ERROR: no root user\n"; exit(1); } $token = $user->createToken("'"{{ coolify_worker_api_token_name }}"'", ["write"]); echo $token->plainTextToken;'
+- name: "[worker] Write token generation PHP script"
+  copy:
+    dest: /tmp/coolify-gen-token.php
+    content: |
+      <?php
+      $user = App\Models\User::where("id", 0)->first();
+      if ($user === null) { fwrite(STDERR, "ERROR: no root user\n"); exit(1); }
+      $token = $user->createToken("{{ coolify_worker_api_token_name }}", ["write"]);
+      echo $token->plainTextToken;
+    mode: "0600"
+  register: _cw_token_script
+  when: not _cw_token_stat.stat.exists
+
+- name: "[worker] Execute token generation in Coolify container"
+  shell:
+    cmd: |
+      set -euo pipefail
+      cd "{{ coolify_source_dir }}"
+      cat /tmp/coolify-gen-token.php | docker compose exec -T coolify php artisan tinker
   register: _cw_token_gen
   changed_when: true
   no_log: true
+  when:
+    - not _cw_token_stat.stat.exists
+    - _cw_token_script is succeeded
+
+- name: "[worker] Clean up token generation PHP script"
+  file:
+    path: /tmp/coolify-gen-token.php
+    state: absent
   when: not _cw_token_stat.stat.exists
 
 - name: "[worker] Persist generated API token"
@@ -56,13 +78,32 @@
     _coolify_api_token: "{{ _cw_token_slurp.content | b64decode | trim }}"
   no_log: true
 
-- name: "[worker] Look up private key UUID"
-  shell: |
-    set -euo pipefail
-    cd "{{ coolify_source_dir }}"
-    docker compose exec -T coolify php artisan tinker --execute='$key = App\Models\PrivateKey::where("team_id", 0)->where("id", "!=", 0)->orderBy("id")->first(); if ($key === null) { echo "ERROR: no private key\n"; exit(1); } echo $key->uuid;'
+- name: "[worker] Write private key UUID lookup PHP script"
+  copy:
+    dest: /tmp/coolify-key-uuid.php
+    content: |
+      <?php
+      $key = App\Models\PrivateKey::where("team_id", 0)
+        ->where("id", "!=", 0)
+        ->orderBy("id")
+        ->first();
+      if ($key === null) { fwrite(STDERR, "ERROR: no private key\n"); exit(1); }
+      echo $key->uuid;
+    mode: "0600"
+
+- name: "[worker] Execute key UUID lookup in Coolify container"
+  shell:
+    cmd: |
+      set -euo pipefail
+      cd "{{ coolify_source_dir }}"
+      cat /tmp/coolify-key-uuid.php | docker compose exec -T coolify php artisan tinker
   register: _cw_key_uuid
   changed_when: false
+
+- name: "[worker] Clean up key UUID lookup PHP script"
+  file:
+    path: /tmp/coolify-key-uuid.php
+    state: absent
 
 - name: "[worker] Set private key UUID fact"
   set_fact:
