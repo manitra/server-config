@@ -12,7 +12,9 @@ A:
   - record: vps13
     value: 13.247.181.158
 
-AAAA: []
+AAAA:
+  - record: vps04
+    value: "2001:41d0:367:894::1"
 #  - record: vps11
 #    value: "2a01:4f8:1c19:e2eb::1"
 #  - record: vps12
