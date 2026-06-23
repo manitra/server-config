@@ -3,4 +3,4 @@
 # Coolify worker host-specific configuration.
 
 maintain_host_authorized_keys:
-  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIODVBr5ACPd5qNenie3NQd30nLRHm2hgIdxvXY/J/liy root@vps11
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE18BZLOKNMd6aDEMC7/8R8d2oOyfvezyl3dgTujBH9t coolify@vps11
