@@ -1,0 +1,6 @@
+---
+# host_vars/vps04.manitra.net/main.yml
+# Coolify worker host-specific configuration.
+
+maintain_host_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIODVBr5ACPd5qNenie3NQd30nLRHm2hgIdxvXY/J/liy root@vps11
