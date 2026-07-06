@@ -7,6 +7,7 @@
 - hosts: hestia
   roles:
     - hestia
+    - wp-secure
 
 - hosts: mail_submission_detector
   roles:

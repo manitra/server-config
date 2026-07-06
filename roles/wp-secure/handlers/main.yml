@@ -1,0 +1,11 @@
+---
+- name: restart fail2ban
+  become: true
+  service:
+    name: fail2ban
+    state: restarted
+
+- name: reload fail2ban
+  become: true
+  command: fail2ban-client reload
+  changed_when: true

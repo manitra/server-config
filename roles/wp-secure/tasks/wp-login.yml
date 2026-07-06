@@ -1,0 +1,42 @@
+---
+# Deploy fail2ban filter + jail for wp-login.php brute-force attacks.
+# Repeated POST requests to wp-login.php from the same IP indicate
+# credential guessing, even if some succeed (attacker found a password).
+
+- name: "[wp-secure wp-login] Deploy fail2ban filter"
+  copy:
+    dest: "/etc/fail2ban/filter.d/{{ wp_secure_wplogin_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # WordPress wp-login.php brute-force filter
+      # Matches POST requests to wp-login.php (login attempts).
+      # A handful of failures within findtime triggers a ban.
+      # Admins who fat-finger their password a few times are unlikely
+      # to hit maxretry within the findtime window.
+      [Definition]
+      failregex = ^<HOST> .* "POST /.*wp-login\.php
+      ignoreregex =
+  notify: reload fail2ban
+  when: wp_secure_wplogin_enabled | bool
+
+- name: "[wp-secure wp-login] Deploy fail2ban jail"
+  copy:
+    dest: "/etc/fail2ban/jail.d/{{ wp_secure_wplogin_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [{{ wp_secure_wplogin_filter }}]
+      enabled  = true
+      backend  = {{ wp_secure_fail2ban_backend }}
+      port     = http,https
+      filter   = {{ wp_secure_wplogin_filter }}
+      logpath  = {{ wp_secure_log_paths | join('\n          ') }}
+      maxretry = {{ wp_secure_wplogin_maxretry }}
+      findtime = {{ wp_secure_wplogin_findtime }}
+      bantime  = {{ wp_secure_wplogin_bantime }}
+      ignoreip = {{ wp_secure_fail2ban_ignoreip }}
+  notify: reload fail2ban
+  when: wp_secure_wplogin_enabled | bool

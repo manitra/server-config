@@ -1,0 +1,16 @@
+---
+dependencies: []
+galaxy_info:
+  author: manitra
+  description: WordPress security hardening via fail2ban jails and web-server rules
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+        - bullseye
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble

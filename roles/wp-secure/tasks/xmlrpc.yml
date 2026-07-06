@@ -1,0 +1,66 @@
+---
+# Deploy fail2ban filter + jail for xmlrpc.php brute-force / amplification attacks.
+# WordPress xmlrpc.php returns HTTP 200 even on failed auth, so we match on
+# POST requests to the endpoint itself. Any IP sending repeated POSTs to
+# xmlrpc.php in a short window is almost certainly attacking.
+
+- name: "[wp-secure xmlrpc] Deploy fail2ban filter"
+  copy:
+    dest: "/etc/fail2ban/filter.d/{{ wp_secure_xmlrpc_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # WordPress xmlrpc.php attack filter
+      # Matches POST requests to xmlrpc.php (any path depth, any status).
+      # Attackers use xmlrpc.php for:
+      #   - Brute-force credential guessing (system.multicall)
+      #   - Pingback amplification / DDoS
+      # WordPress returns 200 with an XML fault on failures, so we
+      # cannot rely on HTTP status codes alone.
+      [Definition]
+      failregex = ^<HOST> .* "POST /.*xmlrpc\.php
+      ignoreregex =
+  notify: reload fail2ban
+  when: wp_secure_xmlrpc_enabled | bool
+
+- name: "[wp-secure xmlrpc] Deploy fail2ban jail"
+  copy:
+    dest: "/etc/fail2ban/jail.d/{{ wp_secure_xmlrpc_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [{{ wp_secure_xmlrpc_filter }}]
+      enabled  = true
+      backend  = {{ wp_secure_fail2ban_backend }}
+      port     = http,https
+      filter   = {{ wp_secure_xmlrpc_filter }}
+      logpath  = {{ wp_secure_log_paths | join('\n          ') }}
+      maxretry = {{ wp_secure_xmlrpc_maxretry }}
+      findtime = {{ wp_secure_xmlrpc_findtime }}
+      bantime  = {{ wp_secure_xmlrpc_bantime }}
+      ignoreip = {{ wp_secure_fail2ban_ignoreip }}
+  notify: reload fail2ban
+  when: wp_secure_xmlrpc_enabled | bool
+
+# Optional: block xmlrpc.php entirely at the web-server level.
+# This is stronger than fail2ban (zero PHP execution) but breaks
+# Jetpack, the WordPress mobile app, and any XML-RPC integrations.
+- name: "[wp-secure xmlrpc] Block xmlrpc.php in .htaccess"
+  blockinfile:
+    path: "{{ item.docroot }}/.htaccess"
+    marker: "# {mark} ANSIBLE MANAGED: wp-secure xmlrpc block"
+    block: |
+      <Files xmlrpc.php>
+          Require all denied
+      </Files>
+    owner: "{{ item.owner | default('www-data') }}"
+    group: "{{ item.owner | default('www-data') }}"
+    mode: "0644"
+    create: true
+  loop: "{{ wp_sites }}"
+  when:
+    - wp_secure_block_xmlrpc | bool
+    - item.webserver == 'apache2'
+  notify: reload fail2ban

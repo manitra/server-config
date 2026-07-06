@@ -1,0 +1,104 @@
+---
+# Deploy fail2ban filter + jail for aggressive bot crawling of heavy
+# WordPress/WooCommerce URLs (cart, checkout, ajax, REST API, etc.).
+#
+# This is NOT a general rate-limiter – it only matches URLs known to
+# generate large responses (~300 KB+ per page on WooCommerce) that
+# crawlers can get stuck on in infinite loops (unique nonces per URL).
+#
+# The findtime/maxretry ratio is intentionally aggressive: 60 requests
+# in 120 s = 0.5 req/s sustained. A human browsing cannot reach this;
+# only automated crawlers will trigger the ban.
+
+- name: "[wp-secure botcrawl] Build escaped URL patterns"
+  set_fact:
+    _wp_botcrawl_escaped: >-
+      {%- set escaped = [] -%}
+      {%- for p in wp_secure_botcrawl_patterns -%}
+        {%- set _ = escaped.append(
+          p | replace('.', '\\.')
+            | replace('-', '\\-')
+            | replace('?', '\\?')
+            | replace('=', '\\=')
+            | replace('+', '\\+')
+            | replace('*', '\\*')
+            | replace('[', '\\[')
+            | replace(']', '\\]')
+            | replace('^', '\\^')
+            | replace('$', '\\$')
+            | replace('(', '\\(')
+            | replace(')', '\\)')
+            | replace('{', '\\{')
+            | replace('}', '\\}')
+            | replace('|', '\\|')
+            | replace('/', '\\/')
+        ) -%}
+      {%- endfor -%}
+      {{ escaped | join('|') }}
+
+- name: "[wp-secure botcrawl] Deploy fail2ban filter"
+  copy:
+    dest: "/etc/fail2ban/filter.d/{{ wp_secure_botcrawl_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # WordPress / WooCommerce bot-crawl filter
+      # Matches GET/HEAD/POST requests to heavy dynamic pages that
+      # crawlers (especially Facebook meta-externalagent) can get
+      # stuck on due to infinite nonce-based URL variations.
+      #
+      # Managed by Ansible – do not edit manually.
+      [Definition]
+      failregex = ^<HOST> .* "(?:GET|HEAD|POST) .*(?:{{ _wp_botcrawl_escaped }})
+      ignoreregex =
+  notify: reload fail2ban
+  when: wp_secure_botcrawl_enabled | bool
+
+- name: "[wp-secure botcrawl] Deploy fail2ban jail"
+  copy:
+    dest: "/etc/fail2ban/jail.d/{{ wp_secure_botcrawl_filter }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [{{ wp_secure_botcrawl_filter }}]
+      enabled  = true
+      backend  = {{ wp_secure_fail2ban_backend }}
+      port     = http,https
+      filter   = {{ wp_secure_botcrawl_filter }}
+      logpath  = {{ wp_secure_log_paths | join('\n          ') }}
+      maxretry = {{ wp_secure_botcrawl_maxretry }}
+      findtime = {{ wp_secure_botcrawl_findtime }}
+      bantime  = {{ wp_secure_botcrawl_bantime }}
+      ignoreip = {{ wp_secure_fail2ban_ignoreip }}
+  notify: reload fail2ban
+  when: wp_secure_botcrawl_enabled | bool
+
+# ── robots.txt: tell well-behaved crawlers to stay away ────────────────────────
+# This works for Google, Bing, and other compliant crawlers (but NOT Facebook,
+# which ignores robots.txt for cart/checkout URLs). Still useful as a first
+# line of defense and reduces noise from legitimate crawlers.
+
+- name: "[wp-secure botcrawl] Deploy restrictive robots.txt"
+  copy:
+    dest: "{{ item.docroot }}/robots.txt"
+    owner: "{{ item.owner | default('www-data') }}"
+    group: "{{ item.owner | default('www-data') }}"
+    mode: "0644"
+    content: |
+      User-agent: *
+      Disallow: /wp-admin/
+      Disallow: /wp-login.php
+      Disallow: /xmlrpc.php
+      Disallow: /panier/
+      Disallow: /commander/
+      Disallow: /mon-compte/
+      Disallow: /wp-json/wc/
+      Disallow: /*?add-to-cart=
+      Disallow: /*?remove_item=
+      Disallow: /*?wc-ajax=
+      Allow: /wp-admin/admin-ajax.php
+      Sitemap: https://{{ item.domain }}/wp-sitemap.xml
+  loop: "{{ wp_sites }}"
+  when: wp_secure_robots_txt | bool

@@ -1,0 +1,115 @@
+---
+# ── wp-secure main tasks ──────────────────────────────────────────────────────
+# 1. Ensure fail2ban is installed and running
+# 2. Discover WordPress sites on the host
+# 3. Deploy fail2ban jails for xmlrpc, wp-login, and bot crawling
+# 4. Deploy robots.txt and optional .htaccess hardening
+
+- name: "[wp-secure] Ensure fail2ban is installed"
+  package:
+    name: fail2ban
+    state: present
+
+- name: "[wp-secure] Ensure fail2ban is running"
+  service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+# ── WordPress site discovery ───────────────────────────────────────────────────
+# On Hestia hosts: scan /home/*/web/*/public_html/wp-config.php
+# On non-Hestia: scan /var/www/**/wp-config.php (extendable via var)
+- name: "[wp-secure] Discover WordPress sites (Hestia paths)"
+  find:
+    paths: /home
+    patterns: wp-config.php
+    recurse: true
+    depth: 5
+    file_type: file
+  register: _wp_find_hestia
+  when: "'hestia' in group_names"
+
+- name: "[wp-secure] Discover WordPress sites (standalone paths)"
+  find:
+    paths: "{{ wp_secure_extra_docroots | default(['/var/www']) }}"
+    patterns: wp-config.php
+    recurse: true
+    depth: 5
+    file_type: file
+  register: _wp_find_standalone
+  when: "'hestia' not in group_names"
+
+- name: "[wp-secure] Build site list"
+  set_fact:
+    _wp_sites_raw: >-
+      {{
+        (_wp_find_hestia.files | default([]))
+        + (_wp_find_standalone.files | default([]))
+      }}
+
+- name: "[wp-secure] Derive domain and log path per site"
+  set_fact:
+    wp_sites: >-
+      {%- set sites = [] -%}
+      {%- for f in _wp_sites_raw -%}
+        {%- set parts = f.path | regex_replace('^/home/([^/]+)/web/([^/]+)/public_html/wp-config.php$', '\\1:\\2') -%}
+        {%- if parts != f.path -%}
+          {%- set owner = parts.split(':')[0] -%}
+          {%- set domain = parts.split(':')[1] -%}
+          {%- set _ = sites.append({
+            'owner': owner,
+            'domain': domain,
+            'docroot': f.path | regex_replace('/wp-config.php$', ''),
+            'logpath': '/var/log/apache2/domains/' + domain + '.log',
+            'webserver': 'apache2',
+            'is_hestia': true
+          }) -%}
+        {%- else -%}
+          {%- set _ = sites.append({
+            'owner': 'www-data',
+            'domain': f.path | regex_replace('.*/([^/]+)/wp-config.php$', '\\1') | default('unknown'),
+            'docroot': f.path | regex_replace('/wp-config.php$', ''),
+            'logpath': '/var/log/apache2/access.log',
+            'webserver': 'apache2',
+            'is_hestia': false
+          }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ sites }}
+
+- name: "[wp-secure] Collect unique log paths (deduplicated)"
+  set_fact:
+    wp_secure_log_paths: "{{ wp_sites | map(attribute='logpath') | unique | list }}"
+
+- name: "[wp-secure] Log discovered sites"
+  debug:
+    msg: "WordPress {{ item.domain }} (user={{ item.owner }}, log={{ item.logpath }})"
+  loop: "{{ wp_sites }}"
+  when: wp_sites | length > 0
+
+- name: "[wp-secure] Warn if no WordPress sites found"
+  debug:
+    msg: "No WordPress sites discovered – wp-secure has nothing to protect."
+  when: wp_sites | length == 0
+
+# ── Deploy fail2ban jails ─────────────────────────────────────────────────────
+- name: "[wp-secure] Configure xmlrpc.php protection"
+  import_tasks: xmlrpc.yml
+  when:
+    - wp_secure_enabled | bool
+    - wp_secure_xmlrpc_enabled | bool
+    - wp_sites | length > 0
+
+- name: "[wp-secure] Configure wp-login.php brute-force protection"
+  import_tasks: wp-login.yml
+  when:
+    - wp_secure_enabled | bool
+    - wp_secure_wplogin_enabled | bool
+    - wp_sites | length > 0
+
+- name: "[wp-secure] Configure bot crawl protection"
+  import_tasks: bot-crawl.yml
+  when:
+    - wp_secure_enabled | bool
+    - wp_secure_botcrawl_enabled | bool
+    - wp_sites | length > 0

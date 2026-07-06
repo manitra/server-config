@@ -1,0 +1,61 @@
+---
+# ── wp-secure: WordPress security hardening via fail2ban ───────────────────────
+# Detects WordPress sites (Hestia-managed or standalone) and deploys fail2ban
+# jails for xmlrpc.php attacks, wp-login brute force, and bot crawling.
+
+# Master switch – set to false to skip all wp-secure tasks on a host
+wp_secure_enabled: true
+
+# ── fail2ban base settings (per-jail overrides below) ──────────────────────────
+wp_secure_fail2ban_backend: polling
+wp_secure_fail2ban_ignoreip: 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+# ── xmlrpc.php jail ───────────────────────────────────────────────────────────
+# WordPress xmlrpc.php returns HTTP 200 even on failed auth attempts.
+# Any repeated POST to xmlrpc.php is treated as an attack.
+wp_secure_xmlrpc_enabled: true
+wp_secure_xmlrpc_filter: wp-xmlrpc
+wp_secure_xmlrpc_maxretry: 10
+wp_secure_xmlrpc_findtime: 300
+wp_secure_xmlrpc_bantime: 3600
+
+# ── wp-login.php jail ─────────────────────────────────────────────────────────
+# Repeated POST requests to wp-login.php indicate brute-force attempts.
+wp_secure_wplogin_enabled: true
+wp_secure_wplogin_filter: wp-login
+wp_secure_wplogin_maxretry: 6
+wp_secure_wplogin_findtime: 300
+wp_secure_wplogin_bantime: 3600
+
+# ── Bot crawl jail ────────────────────────────────────────────────────────────
+# Detects crawlers hammering dynamic WordPress URLs (cart, checkout, ajax, etc.)
+# at an abnormal rate. Uses fail2ban's built-in rate detection.
+# Targets known aggressive crawlers (Facebook, etc.) as well as generic bots.
+wp_secure_botcrawl_enabled: true
+wp_secure_botcrawl_filter: wp-botcrawl
+wp_secure_botcrawl_maxretry: 60
+wp_secure_botcrawl_findtime: 120
+wp_secure_botcrawl_bantime: 7200
+
+# URL patterns that, when hit by a bot at high frequency, trigger a ban.
+# These are WordPress/WooCommerce dynamic pages with heavy payloads.
+# Plain-text substrings matched against the request path (case-sensitive).
+wp_secure_botcrawl_patterns:
+  - xmlrpc.php
+  - wp-login.php
+  - /panier/
+  - /commander/
+  - /mon-compte/
+  - wc-ajax
+  - wp-json/wc/
+  - add-to-cart=
+  - remove_item=
+
+# ── Hardening extras ──────────────────────────────────────────────────────────
+# Block xmlrpc.php entirely via .htaccess (deny all) or web server config.
+# Stronger than fail2ban (no requests reach PHP), but breaks Jetpack/mobile apps.
+wp_secure_block_xmlrpc: false
+
+# Deploy a restrictive robots.txt to each discovered WordPress document root.
+# Tells well-behaved crawlers to stay away from heavy dynamic paths.
+wp_secure_robots_txt: true
