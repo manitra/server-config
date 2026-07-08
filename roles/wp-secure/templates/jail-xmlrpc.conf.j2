@@ -1,0 +1,10 @@
+[{{ wp_secure_xmlrpc_filter }}]
+enabled  = true
+backend  = {{ wp_secure_fail2ban_backend }}
+port     = http,https
+filter   = {{ wp_secure_xmlrpc_filter }}
+logpath  = {{ wp_secure_log_paths | map('regex_replace', '/[^/]+$', '') | unique | map('regex_replace', '$', '/*.log') | join(' ') }}
+maxretry = {{ wp_secure_xmlrpc_maxretry }}
+findtime = {{ wp_secure_xmlrpc_findtime }}
+bantime  = {{ wp_secure_xmlrpc_bantime }}
+ignoreip = {{ wp_secure_fail2ban_ignoreip }}

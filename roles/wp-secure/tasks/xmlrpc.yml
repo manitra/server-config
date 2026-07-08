@@ -25,22 +25,12 @@
   when: wp_secure_xmlrpc_enabled | bool
 
 - name: "[wp-secure xmlrpc] Deploy fail2ban jail"
-  copy:
+  template:
+    src: jail-xmlrpc.conf.j2
     dest: "/etc/fail2ban/jail.d/{{ wp_secure_xmlrpc_filter }}.conf"
     owner: root
     group: root
     mode: "0644"
-    content: |
-      [{{ wp_secure_xmlrpc_filter }}]
-      enabled  = true
-      backend  = {{ wp_secure_fail2ban_backend }}
-      port     = http,https
-      filter   = {{ wp_secure_xmlrpc_filter }}
-      logpath  = {{ wp_secure_log_paths | join('\n          ') }}
-      maxretry = {{ wp_secure_xmlrpc_maxretry }}
-      findtime = {{ wp_secure_xmlrpc_findtime }}
-      bantime  = {{ wp_secure_xmlrpc_bantime }}
-      ignoreip = {{ wp_secure_fail2ban_ignoreip }}
   notify: reload fail2ban
   when: wp_secure_xmlrpc_enabled | bool
 

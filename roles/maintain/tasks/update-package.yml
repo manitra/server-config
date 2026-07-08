@@ -3,6 +3,34 @@
   command: dpkg --configure -a
   changed_when: false
 
+- name: Find deprecated ondrej/php apt source files
+  become: true
+  find:
+    paths: /etc/apt/sources.list.d
+    patterns: "ondrej*"
+    file_type: file
+  register: _ondrej_files
+
+- name: Remove deprecated ondrej/php PPA
+  become: true
+  block:
+    - name: Remove ondrej/php apt sources
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ _ondrej_files.files }}"
+
+    - name: Remove legacy ondrej GPG key
+      apt_key:
+        id: 14AA40EC0831756756D7F66C4F4EA0AAE5267A6C
+        state: absent
+      ignore_errors: true
+
+    - name: Refresh apt cache after PPA removal
+      command: apt-get update --allow-releaseinfo-change
+      changed_when: false
+  when: _ondrej_files.files | length > 0
+
 - name: Update APT packages
   apt:
     upgrade: dist
