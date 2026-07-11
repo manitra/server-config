@@ -1,0 +1,8 @@
+# Managed by Ansible (wp-secure role) — do not edit manually.
+# Ensures fail2ban starts after Apache so that glob-based logpath
+# patterns (e.g. /var/log/apache2/domains/*.log) match existing files.
+# Without this, fail2ban can crash at boot with "Have not found any
+# log file" because Apache hasn't created the access logs yet.
+[Unit]
+After=apache2.service
+Wants=apache2.service

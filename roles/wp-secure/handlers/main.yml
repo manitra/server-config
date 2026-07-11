@@ -1,4 +1,9 @@
 ---
+- name: daemon-reload
+  become: true
+  systemd:
+    daemon_reload: true
+
 - name: restart fail2ban
   become: true
   service:

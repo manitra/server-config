@@ -16,6 +16,27 @@
     state: started
     enabled: true
 
+- name: "[wp-secure] Ensure fail2ban starts after Apache (survives reboot)"
+  block:
+    - name: "[wp-secure] Create systemd override directory"
+      file:
+        path: /etc/systemd/system/fail2ban.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: "[wp-secure] Deploy systemd override for boot ordering"
+      template:
+        src: fail2ban-systemd-override.conf.j2
+        dest: /etc/systemd/system/fail2ban.service.d/wp-secure-after-apache.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - daemon-reload
+        - restart fail2ban
+
 # ── WordPress site discovery ───────────────────────────────────────────────────
 # On Hestia hosts: scan /home/*/web/*/public_html/wp-config.php
 # On non-Hestia: scan /var/www/**/wp-config.php (extendable via var)
