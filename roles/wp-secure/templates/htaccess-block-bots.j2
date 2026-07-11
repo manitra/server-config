@@ -1,0 +1,14 @@
+# Managed by Ansible (wp-secure role) — do not edit manually.
+# Blocks known aggressive crawlers at the .htaccess level using mod_rewrite.
+# This is more reliable than Apache conf-available because Hestia virtual
+# hosts have AllowOverride All and our rules execute in the right context.
+
+RewriteEngine On
+
+RewriteCond %{HTTP_USER_AGENT} meta-externalagent [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} Bytespider [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} YisouSpider [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} SemrushBot [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} AhrefsBot [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} DotBot [NC]
+RewriteRule .* - [F,L]

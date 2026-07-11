@@ -59,3 +59,9 @@ wp_secure_block_xmlrpc: false
 # Deploy a restrictive robots.txt to each discovered WordPress document root.
 # Tells well-behaved crawlers to stay away from heavy dynamic paths.
 wp_secure_robots_txt: true
+
+# Block aggressive crawler User-Agents at the Apache level (SetEnvIf + Require).
+# Targets distributed crawlers (Facebook meta-externalagent, Bytespider, etc.)
+# that use hundreds of IPs, making per-IP fail2ban ineffective.
+# Enabled by default on Hestia hosts (Apache).
+wp_secure_block_aggressive_bots: "{{ 'hestia' in group_names }}"

@@ -113,3 +113,9 @@
     - wp_secure_enabled | bool
     - wp_secure_botcrawl_enabled | bool
     - wp_sites | length > 0
+
+- name: "[wp-secure] Configure aggressive bot User-Agent blocking"
+  import_tasks: bot-block.yml
+  when:
+    - wp_secure_enabled | bool
+    - wp_secure_block_aggressive_bots | bool

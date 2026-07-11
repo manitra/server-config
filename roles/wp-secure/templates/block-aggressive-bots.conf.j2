@@ -1,0 +1,13 @@
+# Managed by Ansible (wp-secure role) — do not edit manually.
+# Blocks known aggressive crawlers via mod_rewrite.  Using RewriteRule [F]
+# (Forbidden) because <Directory>/<Location> blocks are often overridden
+# by Hestia's per-domain virtual host configuration.
+
+RewriteEngine On
+RewriteCond %{HTTP_USER_AGENT} meta-externalagent [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} Bytespider [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} YisouSpider [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} SemrushBot [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} AhrefsBot [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} DotBot [NC]
+RewriteRule .* - [F,L]

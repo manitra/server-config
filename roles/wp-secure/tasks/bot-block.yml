@@ -1,0 +1,22 @@
+---
+# Blocks aggressive crawlers via .htaccess (mod_rewrite) in each WordPress
+# document root.  More reliable than Apache conf-available on Hestia because
+# the <Directory> already has AllowOverride All.
+#
+# Also deploys Apache global config as a fallback for non-Hestia setups.
+
+- name: "[wp-secure botblock] Deploy .htaccess bot-blocking rules"
+  blockinfile:
+    path: "{{ item.docroot }}/.htaccess"
+    marker: "# {mark} ANSIBLE MANAGED: wp-secure bot block"
+    block: "{{ lookup('template', 'htaccess-block-bots.j2') }}"
+    owner: "{{ item.owner | default('www-data') }}"
+    group: "{{ item.owner | default('www-data') }}"
+    mode: "0644"
+    create: true
+    insertbefore: BOF
+  loop: "{{ wp_sites }}"
+  when:
+    - wp_secure_block_aggressive_bots | bool
+    - wp_sites | length > 0
+  notify: reload fail2ban
