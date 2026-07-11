@@ -7,7 +7,9 @@
   become: true
   find:
     paths: /etc/apt/sources.list.d
-    patterns: "ondrej*"
+    patterns:
+      - "*ondrej*"
+      - "*sury*php*"
     file_type: file
   register: _ondrej_files
 
@@ -36,3 +38,10 @@
     upgrade: dist
     update_cache: yes
     lock_timeout: 1800
+  register: _apt_update
+  ignore_errors: true
+
+- name: Retry apt update with releaseinfo change acceptance
+  command: apt-get update --allow-releaseinfo-change && apt-get dist-upgrade -y
+  changed_when: true
+  when: _apt_update is failed
