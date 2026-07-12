@@ -16,6 +16,12 @@
     state: present
     update_cache: true
 
+- name: Ensure Docker is enabled and running
+  systemd:
+    name: docker
+    enabled: true
+    state: started
+
 - name: Ensure SSH user exists
   user:
     name: "{{ coolify_worker_ssh_user }}"
