@@ -33,6 +33,18 @@ CNAME:
     value: vps11.manitra.net
   - record: '*'
     value: vps11.manitra.net
+  - record: auth
+    value: vps11.manitra.net
+  - record: trading
+    value: vps11.manitra.net
+  - record: up
+    value: vps11.manitra.net
+  - record: www.vps03
+    value: vps03.manitra.net
+  - record: www.vps06
+    value: vps06.manitra.net
+  - record: mail
+    value: vps03.manitra.net
 
 MX:
   - record: '@'
