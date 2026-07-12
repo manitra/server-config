@@ -36,3 +36,28 @@
     account_api_key: "{{ cloudflare.api_key }}"
   loop: "{{ CNAME }}"
   when: cloudflare.enabled
+
+- name: MX DNS records
+  community.general.cloudflare_dns:
+    zone: "manitra.net"
+    type: "MX"
+    record: "{{ item.record }}"
+    value: "{{ item.value }}"
+    priority: "{{ item.priority }}"
+    state: "present"
+    account_email: "{{ cloudflare.email }}"
+    account_api_key: "{{ cloudflare.api_key }}"
+  loop: "{{ MX }}"
+  when: cloudflare.enabled
+
+- name: TXT DNS records
+  community.general.cloudflare_dns:
+    zone: "manitra.net"
+    type: "TXT"
+    record: "{{ item.record }}"
+    value: "{{ item.value }}"
+    state: "present"
+    account_email: "{{ cloudflare.email }}"
+    account_api_key: "{{ cloudflare.api_key }}"
+  loop: "{{ TXT }}"
+  when: cloudflare.enabled
