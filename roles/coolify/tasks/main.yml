@@ -219,6 +219,16 @@
   delay: 5
   until: coolify_health_check.status == 200
 
+- name: Enable Coolify API (disabled by default since Sep 2024)
+  shell:
+    cmd: |
+      docker exec coolify php artisan tinker --execute='
+        $s = App\Models\InstanceSettings::find(0);
+        if ($s && !$s->is_api_enabled) { $s->update(["is_api_enabled" => true]); echo "ENABLED"; }
+      '
+  register: _cw_api_enable
+  changed_when: "'ENABLED' in _cw_api_enable.stdout"
+
 - name: "Configure fail2ban auth hardening"
   import_tasks: fail2ban.yml
 
