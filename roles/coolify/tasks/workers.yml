@@ -26,7 +26,7 @@
 - name: "[worker] Generate API token via Coolify artisan"
   shell:
     cmd: |
-      docker exec coolify php artisan tinker --execute='$user = App\Models\User::where("id", 0)->first(); if ($user === null) { fwrite(STDERR, "ERROR: no root user\n"); exit(1); } $plain = \Illuminate\Support\Str::random(40); $token = $user->tokens()->create(["name" => "'"{{ coolify_worker_api_token_name }}"'", "token" => hash("sha256", $plain), "abilities" => ["write"], "team_id" => 0]); echo $token->id . "|" . $plain;'
+      docker exec coolify php artisan tinker --execute='$user = App\Models\User::where("id", 0)->first(); if ($user === null) { fwrite(STDERR, "ERROR: no root user\n"); exit(1); } $plain = \Illuminate\Support\Str::random(40); $token = $user->tokens()->create(["name" => "'"{{ coolify_worker_api_token_name }}"'", "token" => hash("sha256", $plain), "abilities" => ["read", "write"], "team_id" => 0]); echo $token->id . "|" . $plain;'
   register: _cw_token_gen
   changed_when: true
   no_log: true
