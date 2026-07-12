@@ -1,0 +1,17 @@
+---
+# host_vars/vps03.manitra.net/main.yml
+# Email server (HestiaCP) host-specific configuration.
+
+ufw_extra_allow_rules:
+  - port: '8083'
+    proto: tcp
+    comment: 'HestiaCP control panel'
+  - port: '25'
+    proto: tcp
+    comment: 'SMTP (email reception)'
+  - port: '465'
+    proto: tcp
+    comment: 'SMTPS (SMTP over SSL)'
+  - port: '587'
+    proto: tcp
+    comment: 'SMTP submission (email client sending)'
