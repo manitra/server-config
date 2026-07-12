@@ -8,6 +8,20 @@
 # The master must be in the [coolify] inventory group and already set up
 # (its SSH key file at coolify_worker_master_key_pub must exist).
 
+- name: Remove conflicting Docker CE packages (installed with Ubuntu docker.io)
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - docker-ce-rootless-extras
+      - containerd.io
+      - docker-compose-plugin
+      - docker-buildx-plugin
+      - docker-model-plugin
+      - docker-scan-plugin
+    state: absent
+    purge: false
+
 - name: Install Docker engine
   apt:
     name:

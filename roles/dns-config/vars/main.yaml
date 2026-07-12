@@ -45,6 +45,11 @@ CNAME:
     value: vps06.manitra.net
   - record: mail
     value: vps03.manitra.net
+  - record: mail.hello
+    value: vps03.manitra.net
+  - record: webmail.hello
+    value: vps03.manitra.net
+
 
 MX:
   - record: '@'
@@ -70,14 +75,12 @@ TXT:
     value: "v=spf1 a mx include:_spf.google.com include:_spf.mx.cloudflare.net  ~all"
   - record: '@'
     value: "google-site-verification=ug3DTbAm24136ZaL3jHwG3CVeZrEMFlz8qDBNpknDD0"
-  - record: cf2024-1._domainkey
-    value: "\"v=DKIM1; h=sha256; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiweykoi+o48IOGuP7GR3X0MOExCUDY/BCRHoWBnh3rChl7WhdyCxW3jgq1daEjPPqoi7sJvdg5hEQVsgVRQP4DcnQDVjGMbASQtrY4WmB1VebF+RPJB2ECPsEDTpeiI5ZyUAwJaVX7r6bznU67g7LvFq35yIo4sdlmtZGV+i0H4cpYH9+3JJ78k\" \"m4KXwaf9xUJCWF6nxeD+qG6Fyruw1Qlbds2r85U9dkNDVAS3gioCvELryh1TxKGiVTkg4wqHTyHfWsp7KD3WQHYJn0RyfJJu6YEmL77zonn7p2SRMvTMP3ZEXibnC9gz3nnhR6wcYL8Q7zXypKTMD58bTixDSJwIDAQAB\""
   - record: resend._domainkey
     value: "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDRMKAREWE1F20ixIxpyS4qPq6ozauq1hNNTOtUb7tLEz6/6F89tXkZ3UrqAdpPJGJZlH9CQCMJKuOkkQ8kwebuGYJ7THSqUMpbkf4LxM1TD0Aa8a9nxlmd3bjKd+JcKHjOe1VxG9IV9Ul9p5aAx/tI/soGknIOKky7riJMtJyc5QIDAQAB\""
   - record: send
     value: "\"v=spf1 include:amazonses.com -all\""
   - record: hello
-    value: "v=spf1 a mx -all"
+    value: "v=spf1 a mx a:mail.manitra.net -all"
   - record: _dmarc.hello
     value: "v=DMARC1; p=quarantine; pct=100"
   - record: mail._domainkey.hello
