@@ -72,10 +72,16 @@
       snapshots --latest 1 2>&1 \
       | grep -E '^[a-f0-9]' \
       | awk '{print $2, $3}'
+  args:
+    executable: /bin/bash
   loop: "{{ backup_monitor_repos }}"
   register: backup_monitor_snapshot_dates
   changed_when: false
   failed_when: false
+
+- name: "Initialize stale repos list"
+  ansible.builtin.set_fact:
+    backup_monitor_stale_repos: []
 
 - name: "Parse snapshot dates and check staleness"
   ansible.builtin.set_fact:
