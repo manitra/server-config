@@ -70,7 +70,7 @@
     restic -r "{{ backup_monitor_base_path }}/{{ item }}" \
       --password-command 'echo {{ backup_monitor_restic_password }}' \
       snapshots --latest 1 2>&1 \
-      | grep -E '^[a-f0-9]' \
+      | grep -E '^[a-f0-9]{8}\s' \
       | awk '{print $2, $3}'
   args:
     executable: /bin/bash
