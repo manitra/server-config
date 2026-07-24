@@ -67,11 +67,16 @@
   become: true
   ansible.builtin.shell: |
     set -o pipefail
-    restic -r "{{ backup_monitor_base_path }}/{{ item }}" \
+    snap=$(restic -r "{{ backup_monitor_base_path }}/{{ item }}" \
       --password-command 'echo {{ backup_monitor_restic_password }}' \
       snapshots --latest 1 2>&1 \
       | grep -E '^[a-f0-9]{8}\s' \
-      | awk '{print $2, $3}'
+      | awk '{print $2, $3}')
+    if [ -n "$snap" ]; then
+      now=$(date +%s)
+      snap_ts=$(date -d "$snap" +%s)
+      echo "$snap $(( (now - snap_ts) / 3600 ))"
+    fi
   args:
     executable: /bin/bash
   loop: "{{ backup_monitor_repos }}"
@@ -91,26 +96,21 @@
         +
         [{
           'repo': item.item,
-          'last_snapshot': item.stdout | trim,
-          'age_hours': ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-                         - (item.stdout | trim | regex_replace(' ', 'T') ~ '+03:00' | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-                        ).total_seconds() / 3600 ) | round(1)
+          'last_snapshot': item.stdout.split()[:2] | join(' '),
+          'age_hours': item.stdout.split()[2] | int
         }]
       }}
   loop: "{{ backup_monitor_snapshot_dates.results }}"
   when:
     - item.stdout | trim | length > 0
-    - >-
-      ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-         - (item.stdout | trim | regex_replace(' ', 'T') ~ '+03:00' | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-        ).total_seconds() / 3600 ) > (backup_monitor_staleness_hours | float)
+    - (item.stdout.split()[2] | int) > (backup_monitor_staleness_hours | int)
 
 - name: "Collect repos with no snapshots"
   ansible.builtin.set_fact:
     backup_monitor_empty_repos: >-
       {{
         backup_monitor_snapshot_dates.results
-        | rejectattr('stdout', 'regex', '^[a-f0-9]')
+        | selectattr('stdout', 'equalto', '')
         | map(attribute='item')
         | list
       }}
