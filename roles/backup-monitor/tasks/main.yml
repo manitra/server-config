@@ -93,7 +93,7 @@
           'repo': item.item,
           'last_snapshot': item.stdout | trim,
           'age_hours': ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-                         - (item.stdout | trim | to_datetime('%Y-%m-%d %H:%M:%S') | regex_replace(' ', 'T') ~ '+03:00')
+                         - (item.stdout | trim | regex_replace(' ', 'T') ~ '+03:00' | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
                         ).total_seconds() / 3600 ) | round(1)
         }]
       }}
@@ -102,7 +102,7 @@
     - item.stdout | trim | length > 0
     - >-
       ( ( (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
-         - (item.stdout | trim | to_datetime('%Y-%m-%d %H:%M:%S') | regex_replace(' ', 'T') ~ '+03:00')
+         - (item.stdout | trim | regex_replace(' ', 'T') ~ '+03:00' | to_datetime('%Y-%m-%dT%H:%M:%S%z'))
         ).total_seconds() / 3600 ) > (backup_monitor_staleness_hours | float)
 
 - name: "Collect repos with no snapshots"
