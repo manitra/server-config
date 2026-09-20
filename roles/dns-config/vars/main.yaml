@@ -14,7 +14,7 @@ A:
 
 AAAA:
   - record: vps04
-    value: "2001:41d0:367:894::1"
+    value: "2001:41d0:305:2100::7094"
   - record: vps11
     value: "2a01:4f8:1c19:e2eb::1"
   - record: vps12
