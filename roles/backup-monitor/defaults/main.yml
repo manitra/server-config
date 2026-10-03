@@ -58,3 +58,41 @@ backup_monitor_skip_repos:
 
 # If false, stale snapshots produce warnings only (don't fail the playbook).
 backup_monitor_strict_staleness: true
+
+# ---------------------------------------------------------------------------
+# Restore verification ("drill")
+# ---------------------------------------------------------------------------
+# Freshness and `restic check` prove the repository is intact; they do not prove
+# that the payload can be read back. The drill streams real files out of the
+# newest snapshot and validates them, which is the check that actually fails on
+# recovery day.
+#
+# It needs no extra disk or VM: only one file is read per repo, and only a
+# bounded number of repos is drilled per weekly run. The monitor already uses
+# the *recovery* passphrases (backup_monitor_restic_password and
+# backup_monitor_host_passwords), so a passing drill also proves that the
+# escrowed recovery key opens the repository.
+backup_monitor_drill_enabled: true
+
+# Repos to verify per weekly run. The rotation covers every repo over time
+# without making a single run expensive.
+backup_monitor_drill_repos_per_run: 2
+
+# Only files up to this size are streamed into a validator (2 GiB).
+backup_monitor_drill_max_file_bytes: 2147483648
+
+# Timeout for the per-repo drill (seconds).
+backup_monitor_drill_timeout: 1800
+
+# Snapshot files that look like a restorable payload, by extension. The largest
+# matching file within the size cap is used, because a big dump is stronger
+# evidence than a small one. Repos without a match fall back to their largest
+# regular file, so every repo still proves that data can be read back.
+backup_monitor_drill_file_pattern: '\.(sql\.gz|sql|dump|tar\.gz|tgz|tar)$'
+
+# Optional per-repo override: "<host-dir>/<repo>" -> path inside the snapshot.
+# Useful when a repo holds several dumps and only one is worth loading, e.g. the
+# main application database. Example:
+#   backup_monitor_drill_files:
+#     vps11/restic-mysite: /data/coolify/backups/generated/mysite/auto-db.sql.gz
+backup_monitor_drill_files: {}

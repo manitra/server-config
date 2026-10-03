@@ -281,3 +281,13 @@
   when:
     - backup_monitor_strict_staleness | bool
     - (backup_monitor_stale_legacy_hosts | length > 0) or (backup_monitor_missing_legacy_hosts | length > 0)
+
+# ---------------------------------------------------------------------------
+# Restore verification: freshness and `restic check` do not prove that data can
+# be read back, so a bounded slice of repos is drilled every run. Needs no extra
+# disk or host: the payload is streamed out of the snapshot and validated.
+# ---------------------------------------------------------------------------
+
+- name: "Verify that backups can actually be restored"
+  ansible.builtin.include_tasks: restore-verify.yml
+  when: backup_monitor_drill_enabled | bool

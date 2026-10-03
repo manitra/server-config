@@ -1,0 +1,226 @@
+---
+# backup-monitor: restore verification ("drill")
+# ==============================================
+# Freshness and `restic check` prove the repository is intact; they do not prove
+# that the payload can be read back. This drill reads real data out of the
+# newest snapshot and validates it end to end:
+#
+#   1. Census  - the latest snapshot contains files, and how many bytes.
+#   2. Payload - the newest dump/archive is streamed out of the repo and
+#                validated (gzip integrity, tar listing, the dump's end marker,
+#                which catches a truncated pg_dump/mysqldump, or an exact
+#                stream-length match for other file types).
+#
+# Cost: one `restic ls -l` plus one `restic dump` per drilled repo. The payload
+# is piped straight into the validator, so no restore target and no extra disk
+# are required. A bounded slice of repos is drilled per run (see
+# backup_monitor_drill_repos_per_run), rotating week by week.
+#
+# Each repo yields exactly one JSON line, reported at the end of the run. Any
+# `result != ok` fails the playbook.
+
+- name: "Drill: initialise"
+  ansible.builtin.set_fact:
+    backup_monitor_drill_repos: []
+    backup_monitor_drill_results: []
+    backup_monitor_drill_week_slot: 0
+    backup_monitor_drill_week_slots: 0
+
+- name: "Drill: count rotation slots"
+  ansible.builtin.set_fact:
+    backup_monitor_drill_week_slots: >-
+      {{
+        (((backup_monitor_repos | length) / (backup_monitor_drill_repos_per_run | int))
+         | round(0, 'ceil')) | int
+      }}
+  when: backup_monitor_repos | length > 0
+
+- name: "Drill: pick this week's rotation slot"
+  ansible.builtin.set_fact:
+    backup_monitor_drill_week_slot: >-
+      {{ ((ansible_date_time.epoch | int) // 604800) % (backup_monitor_drill_week_slots | int) }}
+  when: (backup_monitor_drill_week_slots | int) > 0
+
+- name: "Drill: select the repos to verify this week"
+  ansible.builtin.set_fact:
+    backup_monitor_drill_repos: >-
+      {{
+        ((backup_monitor_repos | sort) | batch(backup_monitor_drill_repos_per_run | int))[
+          backup_monitor_drill_week_slot | int
+        ]
+      }}
+  when: backup_monitor_repos | length > 0
+
+- name: "Drill: show this week's selection"
+  ansible.builtin.debug:
+    msg: >-
+      Restore drill: verifying {{ backup_monitor_drill_repos | length }} of
+      {{ backup_monitor_repos | length }} repos (slot
+      {{ backup_monitor_drill_week_slot }}/{{ backup_monitor_drill_week_slots }}):
+      {{ backup_monitor_drill_repos | join(', ') }}
+
+- name: "Drill: read data back out of the latest snapshot"
+  become: true
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    key={{ item | quote }}
+    repo="{{ backup_monitor_base_path }}/{{ item }}"
+    pattern={{ backup_monitor_drill_file_pattern | quote }}
+    max_bytes={{ backup_monitor_drill_max_file_bytes | int }}
+    override={{ backup_monitor_drill_files.get(item, '') | quote }}
+
+    # The report is a single JSON line, so Ansible can parse it back. Quotes and
+    # backslashes in a path are escaped to keep the JSON valid.
+    json_str() {
+      printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+    }
+
+    report() {
+      printf '{"repo":"%s","result":"%s","reason":"%s","file":"%s","bytes":%s}\n' \
+        "$(json_str "$key")" "$1" "$(json_str "$2")" "$(json_str "$3")" "${4:-0}"
+    }
+
+    # `ls -l` gives mode, uid, gid, size, date, time and then the path, which may
+    # contain spaces, so the path is taken as everything after the 6th field.
+    split_listing() {
+      awk '
+        $1 ~ /^-/ {
+          size = $4
+          path = $0
+          sub(/^([^ \t]+[ \t]+){6}/, "", path)
+          print size "\t" path
+        }'
+    }
+
+    # Largest file within the size cap, so the drill stays bounded.
+    pick_largest() {
+      awk -F'\t' -v max="$max_bytes" '
+        BEGIN { best = 0; chosen = "" }
+        $1 ~ /^[0-9]+$/ && $1 >= 1 && $1 <= max && $1 >= best { best = $1; chosen = $2 }
+        END { if (chosen != "") printf "%s\t%s", best, chosen }'
+    }
+
+    if ! listing="$(restic -r "$repo" ls -l latest 2>&1)"; then
+      report fail "$(printf '%s' "$listing" | tr '\n' ' ' | cut -c1-200)" "" 0
+      exit 0
+    fi
+
+    if [ "$(printf '%s\n' "$listing" | awk '$1 ~ /^[-d]/ {n++} END {print n+0}')" -eq 0 ]; then
+      report fail "empty_snapshot" "" 0
+      exit 0
+    fi
+
+    files="$(printf '%s\n' "$listing" | split_listing)"
+    candidates="$(printf '%s\n' "$files" | awk -F'\t' -v pat="$pattern" '$2 ~ pat')"
+
+    if [ -n "$override" ]; then
+      best_path="$override"
+      best_size="$(printf '%s\n' "$files" | awk -F'\t' -v p="$override" '$2 == p {print $1; exit}')"
+      if [ -z "$best_size" ]; then
+        report fail "override_not_in_snapshot" "$override" 0
+        exit 0
+      fi
+    else
+      picked="$(printf '%s\n' "$candidates" | pick_largest)"
+      [ -n "$picked" ] || picked="$(printf '%s\n' "$files" | pick_largest)"
+      best_size="${picked%%$'\t'*}"
+      best_path="${picked#*$'\t'}"
+      if [ -z "$best_path" ]; then
+        report fail "no_file_within_size_cap" "" 0
+        exit 0
+      fi
+    fi
+
+    case "$best_path" in
+      *.sql.gz|*.gz)
+        if restic -r "$repo" dump latest "$best_path" 2>/dev/null | gzip -t 2>/dev/null; then
+          report ok "gzip_stream_verified" "$best_path" "$best_size"
+        else
+          report fail "gzip_stream_invalid" "$best_path" "$best_size"
+        fi
+        ;;
+      *.tar.gz|*.tgz)
+        if restic -r "$repo" dump latest "$best_path" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
+          report ok "tar_stream_verified" "$best_path" "$best_size"
+        else
+          report fail "tar_stream_invalid" "$best_path" "$best_size"
+        fi
+        ;;
+      *.tar)
+        if restic -r "$repo" dump latest "$best_path" 2>/dev/null | tar -tf - >/dev/null 2>&1; then
+          report ok "tar_stream_verified" "$best_path" "$best_size"
+        else
+          report fail "tar_stream_invalid" "$best_path" "$best_size"
+        fi
+        ;;
+      *.sql|*.dump)
+        # pg_dump/pg_dumpall and mysqldump/mariadb-dump close the file with a
+        # known marker; anything else means the stream stopped early. awk (not
+        # grep) consumes the whole stream, so no SIGPIPE can mask the result.
+        if restic -r "$repo" dump latest "$best_path" 2>/dev/null \
+             | tail -c 4096 \
+             | awk '/database dump complete|Dump completed/ {found=1} END {exit !found}'; then
+          report ok "dump_end_marker_found" "$best_path" "$best_size"
+        else
+          report fail "dump_truncated_or_unreadable" "$best_path" "$best_size"
+        fi
+        ;;
+      *)
+        # No format-specific validator: prove that the whole file comes back by
+        # comparing the streamed length with the size recorded in the snapshot.
+        stream_bytes="$(restic -r "$repo" dump latest "$best_path" 2>/dev/null | wc -c)"
+        if [ "${stream_bytes:-0}" -eq "${best_size:-0}" ]; then
+          report ok "stream_length_matches_snapshot" "$best_path" "$best_size"
+        else
+          report fail "stream_truncated" "$best_path" "$best_size"
+        fi
+        ;;
+    esac
+
+    exit 0
+  environment:
+    RESTIC_PASSWORD: "{{ backup_monitor_host_passwords.get(item.split('/')[0], backup_monitor_restic_password) }}"
+  args:
+    executable: /bin/bash
+  loop: "{{ backup_monitor_drill_repos }}"
+  register: backup_monitor_drill_stream
+  changed_when: false
+  timeout: "{{ backup_monitor_drill_timeout }}"
+  no_log: true
+
+- name: "Drill: parse results"
+  ansible.builtin.set_fact:
+    backup_monitor_drill_results: >-
+      {{ backup_monitor_drill_results + [item.stdout | trim | from_json] }}
+  loop: "{{ backup_monitor_drill_stream.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout is defined and item.stdout | trim | length > 0
+
+- name: "Drill: report"
+  ansible.builtin.debug:
+    msg: >-
+      {% if backup_monitor_drill_results | length == 0 %}
+      Restore drill: no repo was verified this run.
+      {% else %}
+      RESTORE DRILL RESULTS ({{ backup_monitor_drill_results | selectattr('result', 'eq', 'ok') | list | length }}/{{ backup_monitor_drill_results | length }} ok):
+      {% for r in backup_monitor_drill_results %}
+        {{ 'OK  ' if r.result == 'ok' else 'FAIL' }} {{ r.repo }} -> {{ r.file }} ({{ r.bytes }} bytes, {{ r.reason }})
+      {% endfor %}
+      {% endif %}
+
+- name: "Drill: fail when a repo produced no result"
+  ansible.builtin.fail:
+    msg: >-
+      The restore drill returned nothing for:
+      {{ backup_monitor_drill_repos | difference(backup_monitor_drill_results | map(attribute='repo') | list) | join(', ') }}
+  when: (backup_monitor_drill_results | length) != (backup_monitor_drill_repos | length)
+
+- name: "Drill: fail on unreadable snapshots"
+  ansible.builtin.fail:
+    msg: >-
+      Restore verification failed for:
+      {% for r in backup_monitor_drill_results if r.result != 'ok' %}
+      {{ r.repo }}: {{ r.reason }} (file: {{ r.file }}){% endfor %}
+  when: backup_monitor_drill_results | selectattr('result', 'ne', 'ok') | list | length > 0
