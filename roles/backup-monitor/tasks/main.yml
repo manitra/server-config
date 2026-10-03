@@ -1,8 +1,9 @@
 ---
 # backup-monitor tasks
 # ====================
-# Auto-discovers Hestia restic repos on the backup host, checks snapshot
-# freshness, and runs periodic integrity checks.
+# Auto-discovers restic repos on the backup host, checks snapshot freshness,
+# and runs periodic integrity checks. Covers Hestia hosts and Coolify workload
+# hosts (each family has its own repository passphrase).
 
 - name: "Assert recovery password is configured"
   ansible.builtin.assert:
@@ -32,6 +33,7 @@
       }}
 
 - name: "Discover restic repos per host"
+  become: true
   ansible.builtin.find:
     paths: "{{ backup_monitor_base_path }}/{{ item }}"
     patterns: "restic-*"
@@ -58,6 +60,7 @@
         item.files
         | map(attribute='path')
         | map('regex_replace', '^' ~ (backup_monitor_base_path | regex_escape) ~ '/', '')
+        | reject('in', backup_monitor_skip_repos | default([]))
         | list
       }}
   loop: "{{ backup_monitor_per_host_repos.results }}"
@@ -81,7 +84,7 @@
       echo "$snap $(( (now - snap_ts) / 3600 ))"
     fi
   environment:
-    RESTIC_PASSWORD: "{{ backup_monitor_restic_password }}"
+    RESTIC_PASSWORD: "{{ backup_monitor_host_passwords.get(item.split('/')[0], backup_monitor_restic_password) }}"
   args:
     executable: /bin/bash
   loop: "{{ backup_monitor_repos }}"
@@ -145,7 +148,7 @@
     msg: >-
       {{ backup_monitor_stale_repos | length }} repo(s) have stale snapshots
       and {{ backup_monitor_empty_repos | length }} repo(s) have no snapshots.
-      Run daily.yml on the affected Hestia hosts.
+      Run daily.yml on the affected source hosts.
   when:
     - backup_monitor_strict_staleness | bool
     - (backup_monitor_stale_repos | length > 0) or (backup_monitor_empty_repos | length > 0)
@@ -159,9 +162,9 @@
       - "{{ backup_monitor_base_path }}/{{ item }}"
       - check
       - --read-data-subset={{ backup_monitor_check_read_fraction }}
-    timeout: "{{ backup_monitor_check_timeout }}"
+  timeout: "{{ backup_monitor_check_timeout }}"
   environment:
-    RESTIC_PASSWORD: "{{ backup_monitor_restic_password }}"
+    RESTIC_PASSWORD: "{{ backup_monitor_host_passwords.get(item.split('/')[0], backup_monitor_restic_password) }}"
   loop: "{{ backup_monitor_repos }}"
   register: backup_monitor_check_results
   changed_when: false

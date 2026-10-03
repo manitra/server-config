@@ -2,14 +2,23 @@
 # Weekly backup integrity checks
 # ==============================
 # Runs every Sunday. Targets the backup host (vps06) and:
-#   1. Checks every Hestia restic repo for stale snapshots
+#   1. Checks every restic repo for stale snapshots
 #   2. Runs restic check --read-data-subset=1% on every repo
 #
-# The recovery password is inherited from group_vars/hestia/vault.yml
-# because vps06 belongs to the 'hestia' group.
+# The Hestia recovery password is inherited from group_vars/hestia/vault.yml
+# because vps06 belongs to the 'hestia' group. The Coolify repos use their own
+# recovery key, so the Coolify workloads vault is loaded here explicitly.
 
 - hosts: backup_monitor
+  vars_files:
+    - group_vars/coolify_workloads/vault.yml
   vars:
     backup_monitor_restic_password: "{{ hestia_restic_recovery_password }}"
+    # | trim: the Coolify vault values carry a trailing newline. restic strips
+    # it when reading a password file (which is why the backups work), but
+    # RESTIC_PASSWORD is used verbatim, so env-based access needs the trim.
+    backup_monitor_host_passwords:
+      vps11: "{{ coolify_restic_recovery_password | trim }}"
+      vps04: "{{ coolify_restic_recovery_password | trim }}"
   roles:
     - backup-monitor

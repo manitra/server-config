@@ -1,12 +1,12 @@
 ---
 # backup-monitor: staleness detection and integrity checks for restic repos.
 #
-# Runs on the backup host (vps06). Auto-discovers Hestia backup directories
-# under the base path, then for each restic-* repo:
+# Runs on the backup host (vps06). Auto-discovers backup directories under the
+# base path (Hestia and Coolify workloads), then for each restic-* repo:
 #   1. Checks the latest snapshot age (fails if > staleness threshold)
 #   2. Runs `restic check --read-data-subset=1%` for lightweight integrity
 #
-# Requires the recovery password for repo access. Set via:
+# Requires a recovery password per repo family. Set via:
 #   group_vars/backup_monitor/vault.yml  or  playbook vars.
 
 backup_monitor_base_path: /home/backuper/backup
@@ -30,19 +30,31 @@ backup_monitor_legacy_glob: '*.tar*'
 backup_monitor_legacy_staleness_hours: 28
 backup_monitor_legacy_hosts: []
 
-# Restic repository password (recovery key passphrase).
+# Restic repository password (recovery key passphrase) used for repos that do
+# not have a specific entry in backup_monitor_host_passwords.
 # Must be set via playbook vars or group_vars/backup_monitor/vault.yml.
 backup_monitor_restic_password: ""
 
-# Host directories under base_path to skip (e.g., non-Hestia backups).
+# Per host-directory restic password, for repos that use another key. The
+# Coolify repos (workload hosts) carry an ansible-recovery key opened with
+# coolify_restic_recovery_password instead of the Hestia recovery passphrase.
+backup_monitor_host_passwords: {}
+
+# Host directories under base_path to skip (e.g., non-backup directories).
 backup_monitor_skip_dirs:
-  - vps11            # Coolify backup, different password scheme
   # Retired UGD (digital-gov-mg) backups: no longer updated, so they would
   # always be reported as stale. Kept on disk; just not monitored here.
   - vps13
   - vps13samifin
   - prea.gov.mg
   - hr.digital.gov.mg
+
+# Individual repos (relative to base_path) to skip: orphaned names left behind
+# when a Coolify project's public domain changed. The project is still backed
+# up, under its new repo name.
+backup_monitor_skip_repos:
+  - vps11/restic-hr.digital.gov.mg
+  - vps11/restic-mission.eto.mg
 
 # If false, stale snapshots produce warnings only (don't fail the playbook).
 backup_monitor_strict_staleness: true
