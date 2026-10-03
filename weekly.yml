@@ -4,6 +4,10 @@
 # Runs every Sunday. Targets the backup host (vps06) and:
 #   1. Checks every restic repo for stale snapshots
 #   2. Runs restic check --read-data-subset=1% on every repo
+#   3. Drills a bounded slice of repos: reads real data back out of the newest
+#      snapshot, validates it, and restores it to disk byte for byte, so the
+#      weekly run proves the backups are usable and not merely present
+#      (roles/backup-monitor/README.md)
 #
 # The Hestia recovery password is inherited from group_vars/hestia/vault.yml
 # because vps06 belongs to the 'hestia' group. The Coolify repos use their own
