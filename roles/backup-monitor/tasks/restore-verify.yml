@@ -69,6 +69,7 @@
     pattern={{ backup_monitor_drill_file_pattern | quote }}
     max_bytes={{ backup_monitor_drill_max_file_bytes | int }}
     override={{ backup_monitor_drill_files.get(item, '') | quote }}
+    scratch_root={{ backup_monitor_drill_scratch_dir | quote }}
 
     # The report is a single JSON line, so Ansible can parse it back. Quotes and
     # backslashes in a path are escaped to keep the JSON valid.
@@ -77,9 +78,21 @@
     }
 
     report() {
-      printf '{"repo":"%s","result":"%s","reason":"%s","file":"%s","bytes":%s}\n' \
-        "$(json_str "$key")" "$1" "$(json_str "$2")" "$(json_str "$3")" "${4:-0}"
+      printf '{"repo":"%s","result":"%s","reason":"%s","file":"%s","bytes":%s,"sha256":"%s"}\n' \
+        "$(json_str "$key")" "$1" "$(json_str "$2")" "$(json_str "$3")" "${4:-0}" "${5:-}"
     }
+
+    hash_stream() {
+      if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | cut -d' ' -f1
+      else
+        shasum -a 256 | cut -d' ' -f1
+      fi
+    }
+
+    mkdir -p "$scratch_root"
+    scratch="$(mktemp -d "${scratch_root}/${key//\//_}.XXXXXX")"
+    trap 'rm -rf "$scratch"' EXIT
 
     # `ls -l` gives mode, uid, gid, size, date, time and then the path, which may
     # contain spaces, so the path is taken as everything after the 6th field.
@@ -132,26 +145,33 @@
       fi
     fi
 
+    # 1. Stream the payload out of the repository and validate its structure.
+    stream_result=ok
+    stream_reason=""
+
     case "$best_path" in
       *.sql.gz|*.gz)
         if restic -r "$repo" dump latest "$best_path" 2>/dev/null | gzip -t 2>/dev/null; then
-          report ok "gzip_stream_verified" "$best_path" "$best_size"
+          stream_reason="gzip_stream_verified"
         else
-          report fail "gzip_stream_invalid" "$best_path" "$best_size"
+          stream_result=fail
+          stream_reason="gzip_stream_invalid"
         fi
         ;;
       *.tar.gz|*.tgz)
         if restic -r "$repo" dump latest "$best_path" 2>/dev/null | tar -tzf - >/dev/null 2>&1; then
-          report ok "tar_stream_verified" "$best_path" "$best_size"
+          stream_reason="tar_stream_verified"
         else
-          report fail "tar_stream_invalid" "$best_path" "$best_size"
+          stream_result=fail
+          stream_reason="tar_stream_invalid"
         fi
         ;;
       *.tar)
         if restic -r "$repo" dump latest "$best_path" 2>/dev/null | tar -tf - >/dev/null 2>&1; then
-          report ok "tar_stream_verified" "$best_path" "$best_size"
+          stream_reason="tar_stream_verified"
         else
-          report fail "tar_stream_invalid" "$best_path" "$best_size"
+          stream_result=fail
+          stream_reason="tar_stream_invalid"
         fi
         ;;
       *.sql|*.dump)
@@ -161,9 +181,10 @@
         if restic -r "$repo" dump latest "$best_path" 2>/dev/null \
              | tail -c 4096 \
              | awk '/database dump complete|Dump completed/ {found=1} END {exit !found}'; then
-          report ok "dump_end_marker_found" "$best_path" "$best_size"
+          stream_reason="dump_end_marker_found"
         else
-          report fail "dump_truncated_or_unreadable" "$best_path" "$best_size"
+          stream_result=fail
+          stream_reason="dump_truncated_or_unreadable"
         fi
         ;;
       *)
@@ -171,12 +192,56 @@
         # comparing the streamed length with the size recorded in the snapshot.
         stream_bytes="$(restic -r "$repo" dump latest "$best_path" 2>/dev/null | wc -c)"
         if [ "${stream_bytes:-0}" -eq "${best_size:-0}" ]; then
-          report ok "stream_length_matches_snapshot" "$best_path" "$best_size"
+          stream_reason="stream_length_matches_snapshot"
         else
-          report fail "stream_truncated" "$best_path" "$best_size"
+          stream_result=fail
+          stream_reason="stream_truncated:${stream_bytes}"
         fi
         ;;
     esac
+
+    if [ "$stream_result" = "fail" ]; then
+      report fail "$stream_reason" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    # 2. Restore the same file to disk, which exercises the extraction path that
+    #    streaming does not (directory creation, metadata, sparse handling) and
+    #    gives the file an on-disk artefact to compare byte for byte.
+    need_kb=$(( (best_size / 1024) + 1024 ))
+    avail_kb="$(df -Pk "$scratch_root" 2>/dev/null | awk 'NR==2 {print $4}')"
+    if [ "${avail_kb:-0}" -lt "$need_kb" ]; then
+      report fail "insufficient_scratch_space:${avail_kb}kb" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    if ! restic -r "$repo" restore latest --target "$scratch" --include "$best_path" >/dev/null 2>&1; then
+      report fail "restore_failed" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    restored="${scratch}/${best_path#/}"
+    if [ ! -f "$restored" ]; then
+      report fail "restore_missing_file" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    restored_size="$(stat -c%s "$restored" 2>/dev/null || stat -f%z "$restored")"
+    if [ "$restored_size" -ne "$best_size" ]; then
+      report fail "restored_size_mismatch:${restored_size}" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    # The restored bytes must be identical to what the repository hands out, so a
+    # silent corruption on the way to disk cannot pass as a successful restore.
+    restored_hash="$(hash_stream < "$restored")"
+    snapshot_hash="$(restic -r "$repo" dump latest "$best_path" 2>/dev/null | hash_stream)"
+    if [ -z "$restored_hash" ] || [ "$restored_hash" != "$snapshot_hash" ]; then
+      report fail "restored_content_mismatch" "$best_path" "$best_size"
+      exit 0
+    fi
+
+    report ok "${stream_reason}+restored_sha256_verified" "$best_path" "$best_size" "$restored_hash"
 
     exit 0
   environment:
@@ -206,9 +271,28 @@
       {% else %}
       RESTORE DRILL RESULTS ({{ backup_monitor_drill_results | selectattr('result', 'eq', 'ok') | list | length }}/{{ backup_monitor_drill_results | length }} ok):
       {% for r in backup_monitor_drill_results %}
-        {{ 'OK  ' if r.result == 'ok' else 'FAIL' }} {{ r.repo }} -> {{ r.file }} ({{ r.bytes }} bytes, {{ r.reason }})
+        {{ 'OK  ' if r.result == 'ok' else 'FAIL' }} {{ r.repo }} -> {{ r.file }} ({{ r.bytes }} bytes, {{ r.reason }}){% if r.sha256 | default('') %} sha256:{{ (r.sha256 | default(''))[:12] }}{% endif %}
       {% endfor %}
       {% endif %}
+
+- name: "Drill: ensure the evidence directory exists"
+  become: true
+  ansible.builtin.file:
+    path: "{{ backup_monitor_drill_report_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Drill: record the evidence for this run"
+  become: true
+  ansible.builtin.copy:
+    content: "{{ backup_monitor_drill_results | to_nice_json }}"
+    dest: "{{ backup_monitor_drill_report_dir }}/restore-drill-{{ ansible_date_time.date }}.json"
+    owner: root
+    group: root
+    mode: "0644"
+  changed_when: false
 
 - name: "Drill: fail when a repo produced no result"
   ansible.builtin.fail:

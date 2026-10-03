@@ -84,6 +84,16 @@ backup_monitor_drill_max_file_bytes: 2147483648
 # Timeout for the per-repo drill (seconds).
 backup_monitor_drill_timeout: 1800
 
+# Where the drilled payload is restored to. Only one file at a time is written,
+# and it is deleted again immediately, so this needs room for a single file, not
+# for a copy of the repository. Keep it off the volume that holds the backups so
+# a drill can never fill the only copy.
+backup_monitor_drill_scratch_dir: /var/tmp/backup-monitor-drill
+
+# One JSON evidence file per run (the drill results), so a gap in the history is
+# itself visible.
+backup_monitor_drill_report_dir: /var/log/backup-monitor
+
 # Snapshot files that look like a restorable payload, by extension. The largest
 # matching file within the size cap is used, because a big dump is stronger
 # evidence than a small one. Repos without a match fall back to their largest
