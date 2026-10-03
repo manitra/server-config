@@ -27,13 +27,14 @@
 # What this role currently automates
 # ----------------------------------
 # - Detect that server-global incremental backup is enabled
-# - Force BACKUPS_INCREMENTAL='yes' in every Hestia user.conf
+# - Enable BACKUPS_INCREMENTAL='yes' on every Hestia package, then propagate
+#   the change to the users on those packages via v-update-user-package
 # - Read the repo base from /usr/local/hestia/conf/restic.conf
 # - Add a labeled recovery key to each user repository when missing
-# - Apply a localized hotfix to v-backup-user-restic so the managed cron can
-#   invoke it without tripping on the BACKUP_SYSTEM guard
 # - Manage a daily hestiaweb cron entry for:
 #   sudo /usr/local/hestia/bin/v-backup-users-restic
+# - Optionally patch the upstream BACKUP_SYSTEM guard in v-backup-user-restic
+#   (hestia_restic_guard_hotfix_enabled) for restic-only hosts
 #
 # Important runtime behavior
 # --------------------------
@@ -53,8 +54,10 @@
 #    REPO='sftp:backuper@vps06.manitra.net:/home/backuper/backup/<server>/restic-'
 # 5. Ensure BACKUP_INCREMENTAL='yes' in Hestia.
 # 6. Enable hestia_incremental_backup_cron for that host in inventory vars.
-# 7. Run this role so it enables per-user incremental backup, installs the
-#    hotfix, manages recovery keys, and creates the cron entry.
+# 7. Run this role so it enables incremental backup on the packages and
+#    propagates them, manages recovery keys, and creates the cron entry.
+#    Set hestia_restic_guard_hotfix_enabled only for hosts that have no
+#    classic backup system (see defaults/main.yml).
 #
 - name: "Read Hestia server backup config"
   become: true
@@ -91,14 +94,34 @@
   register: hestia_user_config_files
   when: hestia_server_incremental_backup_enabled | bool
 
-- name: "Enable incremental backup for all Hestia users"
+- name: "Find Hestia packages"
+  become: true
+  ansible.builtin.find:
+    paths: /usr/local/hestia/data/packages
+    patterns: '*.pkg'
+    file_type: file
+  register: hestia_package_files
+  when: hestia_server_incremental_backup_enabled | bool
+
+- name: "Enable incremental backups on every Hestia package"
   become: true
   ansible.builtin.lineinfile:
     path: "{{ item.path }}"
     regexp: "^BACKUPS_INCREMENTAL="
+    insertafter: "^BACKUPS="
     line: "BACKUPS_INCREMENTAL='yes'"
-    backrefs: false
-  loop: "{{ hestia_user_config_files.files }}"
+  loop: "{{ hestia_package_files.files }}"
+  register: hestia_package_incremental
+  when: hestia_server_incremental_backup_enabled | bool
+
+- name: "Propagate changed packages to their users"
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /usr/local/hestia/bin/v-update-user-package
+      - "{{ item.item.path | basename | regex_replace('\\.pkg$', '') }}"
+  loop: "{{ hestia_package_incremental.results | selectattr('changed') | list }}"
+  changed_when: true
   when: hestia_server_incremental_backup_enabled | bool
 
 - name: "Read Hestia restic repository config"
