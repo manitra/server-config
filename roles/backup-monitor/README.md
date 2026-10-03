@@ -26,8 +26,16 @@ per run, rotating week by week (`weeks since epoch % slots`).
    `restic dump` and validated: gzip integrity, tar listing, the dump's end
    marker (this catches a truncated `pg_dump`/`pg_dumpall`/`mysqldump`, whose
    trailer is always written last), or an exact stream length for other file
-   types. Repos with no dump fall back to their largest regular file, so every
-   repo still proves that bytes come back.
+   types.
+
+   A snapshot that contains **no** dump or archive is an error
+   (`no_payload_found`). It means either that the backup stopped producing a
+   payload or that nobody has ever checked what the repository holds — the
+   failure mode that hid a five-month backup outage. Repos that legitimately
+   hold no payload (for example a stack with no database) must be listed in
+   `backup_monitor_drill_allow_no_payload`; they are then still verified against
+   their largest regular file and reported as `no_payload_allowed`, so the
+   exemption is visible in every run instead of being silent.
 3. **Restore** — the same file is restored to
    `backup_monitor_drill_scratch_dir` and must be byte-identical to the streamed
    copy: same size, same sha256. This exercises the extraction path a real
@@ -70,6 +78,17 @@ backup_monitor_drill_files:
 
 The key is the repository directory relative to `backup_monitor_base_path`, as
 printed by the "Drill: show this week's selection" step.
+
+Repos that hold no dump at all are errors by default. Exempt the ones that
+legitimately have none, for example a stack with no database:
+
+```yaml
+backup_monitor_drill_allow_no_payload:
+  - vps04/restic-ai.manitra.net
+```
+
+An exempt repo is still restored and hash-checked, but its result carries
+`no_payload_allowed`, so the weaker evidence stays visible.
 
 ## What it still does not prove
 

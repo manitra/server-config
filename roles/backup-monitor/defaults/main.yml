@@ -96,9 +96,16 @@ backup_monitor_drill_report_dir: /var/log/backup-monitor
 
 # Snapshot files that look like a restorable payload, by extension. The largest
 # matching file within the size cap is used, because a big dump is stronger
-# evidence than a small one. Repos without a match fall back to their largest
-# regular file, so every repo still proves that data can be read back.
+# evidence than a small one.
 backup_monitor_drill_file_pattern: '\.(sql\.gz|sql|dump|tar\.gz|tgz|tar)$'
+
+# A snapshot that contains no dump or archive is an error by default: it means
+# either that the backup stopped producing one, or that nobody has ever checked
+# what the repository holds - the failure mode that hid a five-month backup
+# outage before. List the repos that legitimately have no payload here; they are
+# still verified, against their largest regular file, and reported as
+# no_payload_allowed instead of passing as a normal payload.
+backup_monitor_drill_allow_no_payload: []
 
 # Optional per-repo override: "<host-dir>/<repo>" -> path inside the snapshot.
 # Useful when a repo holds several dumps and only one is worth loading, e.g. the

@@ -69,6 +69,7 @@
     pattern={{ backup_monitor_drill_file_pattern | quote }}
     max_bytes={{ backup_monitor_drill_max_file_bytes | int }}
     override={{ backup_monitor_drill_files.get(item, '') | quote }}
+    allow_no_payload={{ 'yes' if item in backup_monitor_drill_allow_no_payload else 'no' }}
     scratch_root={{ backup_monitor_drill_scratch_dir | quote }}
 
     # The report is a single JSON line, so Ansible can parse it back. Quotes and
@@ -126,6 +127,7 @@
 
     files="$(printf '%s\n' "$listing" | split_listing)"
     candidates="$(printf '%s\n' "$files" | awk -F'\t' -v pat="$pattern" '$2 ~ pat')"
+    fallback=""
 
     if [ -n "$override" ]; then
       best_path="$override"
@@ -136,13 +138,32 @@
       fi
     else
       picked="$(printf '%s\n' "$candidates" | pick_largest)"
-      [ -n "$picked" ] || picked="$(printf '%s\n' "$files" | pick_largest)"
-      best_size="${picked%%$'\t'*}"
-      best_path="${picked#*$'\t'}"
-      if [ -z "$best_path" ]; then
-        report fail "no_file_within_size_cap" "" 0
+
+      if [ -z "$picked" ] && [ -n "$candidates" ]; then
+        report fail "no_payload_within_size_cap" "" 0
         exit 0
       fi
+
+      if [ -z "$picked" ]; then
+        # Nothing in this snapshot looks like a dump or archive. That is an
+        # error unless the repo is listed in
+        # backup_monitor_drill_allow_no_payload, because it means either the
+        # backup stopped producing a payload or nobody has ever checked what
+        # the repository holds.
+        if [ "$allow_no_payload" != "yes" ]; then
+          report fail "no_payload_found" "" 0
+          exit 0
+        fi
+        fallback="no_payload_allowed+"
+        picked="$(printf '%s\n' "$files" | pick_largest)"
+        if [ -z "$picked" ]; then
+          report fail "no_file_within_size_cap" "" 0
+          exit 0
+        fi
+      fi
+
+      best_size="${picked%%$'\t'*}"
+      best_path="${picked#*$'\t'}"
     fi
 
     # 1. Stream the payload out of the repository and validate its structure.
@@ -241,7 +262,7 @@
       exit 0
     fi
 
-    report ok "${stream_reason}+restored_sha256_verified" "$best_path" "$best_size" "$restored_hash"
+    report ok "${fallback}${stream_reason}+restored_sha256_verified" "$best_path" "$best_size" "$restored_hash"
 
     exit 0
   environment:
