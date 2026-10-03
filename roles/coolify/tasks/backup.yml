@@ -4,6 +4,10 @@
 # =================================
 # Mirrors the pattern established by roles/hestia/tasks/backup.yml.
 #
+# Runs on every host of the [coolify_workloads] group, i.e. the Coolify platform
+# host ([coolify]) and its registered workers ([coolify_worker]). Each host backs
+# up its own local Docker workloads into its own repository directory.
+#
 # Destination (backup host – vps06 today)
 # ----------------------------------------
 # Same backuper@vps06 account used by Hestia hosts:
@@ -12,11 +16,11 @@
 #   - Directory /home/backuper/backup/<server>/ on vps06
 #   - Standard OpenSSH SFTP (no special restic server required)
 #
-# Source host requirements (vps11 / any future coolify host)
-# ----------------------------------------------------------
+# Source host requirements (vps11, vps04, ...)
+# --------------------------------------------
 #   - restic binary installed (this task file installs it via apt)
-#   - Docker running with the Coolify stack up
-#   - coolify_restic_password set in group_vars/coolify/vault.yml
+#   - Docker running with the Coolify workloads up
+#   - coolify_restic_password set in group_vars/coolify_workloads/vault.yml
 #
 # What this task file automates
 # ------------------------------
@@ -45,8 +49,9 @@
 #
 # How to onboard another Coolify host
 # ------------------------------------
-#   1. Add the host to [coolify] in inventory.ini.
-#   2. Run daily.yml (or target the coolify role directly).
+#   1. Add the host to [coolify] (platform) or [coolify_worker] (worker) in
+#      inventory.ini; both are children of [coolify_workloads].
+#   2. Run daily.yml (or `daily.yml --tags coolify_backup`).
 #   3. Add host_vars/<host>/main.yml only for exceptions such as extra excludes,
 #      custom dump definitions, or a non-default public Coolify domain.
 
@@ -72,8 +77,8 @@
       coolify_restic_backup_enabled is true but coolify_restic_repo_base or
       coolify_restic_password is empty, or the backup host is not configured,
       and neither seed backup paths nor mount autodiscovery are configured.
-      Set them in group_vars/coolify/main.yml and group_vars/coolify/vault.yml
-      before enabling backup.
+      Set them in group_vars/coolify_workloads/main.yml and
+      group_vars/coolify_workloads/vault.yml before enabling backup.
   when: coolify_restic_backup_enabled | bool
 
 - name: "Assert recovery passphrase is defined when recovery-key management is enabled"
@@ -83,7 +88,7 @@
     fail_msg: >-
       coolify_restic_recovery_key_manage is true but
       coolify_restic_recovery_password is empty. Add it to
-      group_vars/coolify/vault.yml (ansible-vault encrypted).
+      group_vars/coolify_workloads/vault.yml (ansible-vault encrypted).
   when:
     - coolify_restic_backup_enabled | bool
     - coolify_restic_recovery_key_manage | bool
@@ -154,10 +159,10 @@
 
 - name: "Scan backup host SSH key"
   become: true
-  ansible.builtin.command:
-    argv:
-      - ssh-keyscan
-      - "{{ coolify_restic_backup_host }}"
+  ansible.builtin.shell:
+    # ssh-keyscan prints "# host:22 SSH-2.0-..." comment lines that the
+    # known_hosts module rejects, so only keep the actual public keys.
+    cmd: "ssh-keyscan {{ coolify_restic_backup_host }} 2>/dev/null | grep -v '^#'"
   register: coolify_restic_backup_host_keyscan
   changed_when: false
   when: coolify_restic_backup_enabled | bool

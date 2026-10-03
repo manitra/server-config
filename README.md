@@ -17,23 +17,27 @@ Before applying `daily.yml`, make sure every relay user password referenced from
 
 ## Coolify restic backup
 
-The `coolify` role includes restic backup support for every host in the
-`[coolify]` inventory group.
+The `coolify` role's backup tasks run on every host of the `[coolify_workloads]`
+inventory group, i.e. the Coolify platform (`[coolify]`) **and** its registered
+workers (`[coolify_worker]`). Each host backs up its own local Docker workloads.
 
 ### How it works
 
-1. A wrapper script (`/usr/local/sbin/coolify-backup`) is deployed to the Coolify host.
+1. A wrapper script (`/usr/local/sbin/coolify-backup`) is deployed to the host.
 2. At the scheduled time the script:
    - Auto-discovers all running Postgres/MySQL/MariaDB containers and runs
-     logical dumps **inside** them.
+     logical dumps **inside** them (using `mariadb-dump` on MariaDB images and
+     `mysqldump` elsewhere).
    - Auto-discovers mounted Docker host paths from running containers.
    - Backs up the resolved paths with `restic`, **excluding** raw DB data
      directories, which are unsafe for live file snapshots.
    - Prunes old snapshots (daily/weekly/monthly retention).
    - Removes the generated dumps after they are safely stored in restic.
+   - A single failed dump no longer aborts the run: the failure is logged and
+     the script exits non-zero after the backups it could still perform.
 3. The restic repositories live on `vps06` under
   `/home/backuper/backup/<host>/`, accessed over SFTP as `backuper`.
-  - `restic-coolify` stores the Coolify platform data.
+  - `restic-coolify` stores the host's Coolify platform data.
   - `restic-<public-domain>` stores each discovered Coolify application project.
 4. The role now bootstraps the source host SSH key, trusts `vps06`, creates the
    destination directory on `vps06`, and authorizes the source host key there.
@@ -50,14 +54,15 @@ The `coolify` role includes restic backup support for every host in the
 
 ### Shared Coolify backup configuration
 
-- `group_vars/coolify/main.yml` enables backup by default for the whole group.
+- `group_vars/coolify_workloads/main.yml` enables backup by default for the whole
+  `[coolify_workloads]` group (platform + workers).
 - `group_vars/coolify/main.yml` enables automatic localhost SSH bootstrap for
   Coolify and keeps primary-user key management non-exclusive on those hosts so
   the generated Coolify key is not stripped by the `maintain` role.
-- `group_vars/coolify/vault.yml` is now a **whole-file vault**, so
-  `ansible-vault edit group_vars/coolify/vault.yml` works normally.
-- `group_vars/coolify/vault.example.yml` shows the plaintext structure,
-  including where `coolify_restic_recovery_password` is stored.
+- `group_vars/coolify_workloads/vault.yml` is a **whole-file vault**, so
+  `ansible-vault edit group_vars/coolify_workloads/vault.yml` works normally.
+- `group_vars/coolify_workloads/vault.example.yml` shows the plaintext
+  structure, including where `coolify_restic_recovery_password` is stored.
 - The repository base path is derived automatically as:
   `sftp:backuper@vps06.manitra.net:/home/backuper/backup/<inventory-short-host>`
 - Each backup run creates or updates one repo per project, for example
@@ -86,7 +91,8 @@ coolify_restic_excludes:
 
 See the *How to onboard another Coolify host* section at the top of
 `roles/coolify/tasks/backup.yml` for the full checklist. The short version:
-- Add the host to `[coolify]` in `inventory.ini`.
-- Run `daily.yml`.
+- Add the host to `[coolify]` (platform) or `[coolify_worker]` (worker) in
+  `inventory.ini`; both are children of `[coolify_workloads]`.
+- Run `daily.yml` (or `daily.yml --tags coolify_backup` to only run backups).
 - Only add `host_vars/<host>/main.yml` if that host needs exceptions such as
   manual dump overrides or extra excludes.

@@ -43,6 +43,17 @@
   roles:
     - coolify_worker
 
+# Restic backups run on every host that carries Coolify-managed workloads.
+# Only the backup tasks are included, so a worker never gets the platform role.
+# Tagged so it can be re-run alone: ansible-playbook daily.yml --tags coolify_backup
+- hosts: coolify_workloads
+  tags: coolify_backup
+  tasks:
+    - name: Coolify restic backup
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: backup.yml
+
 - hosts: imgproc
   roles:
     - img-proc

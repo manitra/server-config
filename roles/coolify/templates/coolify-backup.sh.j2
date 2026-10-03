@@ -218,6 +218,16 @@ container_db_mount_key() {
     | paste -sd, -
 }
 
+# Destination of the database data mount, if any. Used to classify containers
+# whose image name does not reveal the engine (Coolify-built service images).
+container_db_data_destination() {
+  local container="$1"
+
+  docker inspect --format '{{ '{{' }}range .Mounts{{ '}}' }}{{ '{{' }}println .Destination{{ '}}' }}{{ '{{' }}end{{ '}}' }}' "${container}" 2>/dev/null \
+    | grep -E '^/var/lib/(postgresql/data|mysql)$' \
+    || true
+}
+
 register_db_mount_excludes() {
   local repo_key="$1"
   local container="$2"
@@ -410,7 +420,11 @@ seed_repositories() {
 
   register_repo "core" "${PLATFORM_REPO_NAME}" "coolify"
   for backup_path in "${PLATFORM_SEED_PATHS[@]}"; do
-    repo_add_path "core" "${backup_path}"
+    # Platform seed paths only exist on the host running the Coolify platform;
+    # a worker simply keeps whichever of them is present.
+    if [ -e "${backup_path}" ]; then
+      repo_add_path "core" "${backup_path}"
+    fi
   done
 
   while IFS= read -r container; do
@@ -603,7 +617,32 @@ discover_database_dumps() {
         fi
         ;;
       *)
-        continue
+        # Coolify service images built from a Dockerfile have no engine name in
+        # the image tag, so classify them by their database data mount instead.
+        case "$(container_db_data_destination "${container}")" in
+          *postgresql*)
+            dump_type="postgres"
+            user="$(container_env_value "${container}" POSTGRES_USER)"
+            if [ -z "${user}" ]; then
+              user="postgres"
+            fi
+            if container_has_env_key "${container}" POSTGRES_PASSWORD; then
+              password_env="POSTGRES_PASSWORD"
+            fi
+            ;;
+          /var/lib/mysql)
+            dump_type="mysql"
+            user="root"
+            if container_has_env_key "${container}" MYSQL_ROOT_PASSWORD; then
+              password_env="MYSQL_ROOT_PASSWORD"
+            elif container_has_env_key "${container}" MARIADB_ROOT_PASSWORD; then
+              password_env="MARIADB_ROOT_PASSWORD"
+            fi
+            ;;
+          *)
+            continue
+            ;;
+        esac
         ;;
     esac
 
