@@ -40,11 +40,15 @@
   loop: "{{ backup_monitor_active_hosts }}"
   register: backup_monitor_per_host_repos
 
+- name: "Initialize repo inventory"
+  ansible.builtin.set_fact:
+    backup_monitor_repos: []
+
 - name: "Build repo inventory"
   ansible.builtin.set_fact:
     backup_monitor_repos: >-
       {{
-        backup_monitor_repos | default([])
+        backup_monitor_repos
         +
         repos_for_host
       }}
@@ -68,7 +72,6 @@
   ansible.builtin.shell: |
     set -o pipefail
     snap=$(restic -r "{{ backup_monitor_base_path }}/{{ item }}" \
-      --password-command 'echo {{ backup_monitor_restic_password }}' \
       snapshots --latest 1 2>&1 \
       | grep -E '^[a-f0-9]{8}\s' \
       | awk '{print $2, $3}')
@@ -77,12 +80,15 @@
       snap_ts=$(date -d "$snap" +%s)
       echo "$snap $(( (now - snap_ts) / 3600 ))"
     fi
+  environment:
+    RESTIC_PASSWORD: "{{ backup_monitor_restic_password }}"
   args:
     executable: /bin/bash
   loop: "{{ backup_monitor_repos }}"
   register: backup_monitor_snapshot_dates
   changed_when: false
   failed_when: false
+  no_log: true
 
 - name: "Initialize stale repos list"
   ansible.builtin.set_fact:
@@ -101,6 +107,7 @@
         }]
       }}
   loop: "{{ backup_monitor_snapshot_dates.results }}"
+  no_log: true
   when:
     - item.stdout | trim | length > 0
     - (item.stdout.split()[2] | int) > (backup_monitor_staleness_hours | int)
@@ -150,11 +157,11 @@
       - restic
       - -r
       - "{{ backup_monitor_base_path }}/{{ item }}"
-      - --password-command
-      - echo {{ backup_monitor_restic_password }}
       - check
       - --read-data-subset={{ backup_monitor_check_read_fraction }}
     timeout: "{{ backup_monitor_check_timeout }}"
+  environment:
+    RESTIC_PASSWORD: "{{ backup_monitor_restic_password }}"
   loop: "{{ backup_monitor_repos }}"
   register: backup_monitor_check_results
   changed_when: false
@@ -165,3 +172,109 @@
       restic check failed for {{ item.item }}: {{ item.stderr_lines | default(item.msg) }}
   loop: "{{ backup_monitor_check_results.results }}"
   when: item.failed | default(false)
+
+# ---------------------------------------------------------------------------
+# Legacy (non-restic) backups: <host>/<user>.<date>.tar archives.
+# Hosts that contain at least one archive are checked for freshness; hosts
+# listed in backup_monitor_legacy_hosts are always checked (so a host whose
+# backups stopped entirely is reported as missing, not silently ignored).
+# ---------------------------------------------------------------------------
+
+- name: "Find newest legacy backup archive per host"
+  become: true
+  ansible.builtin.shell: |
+    set -o pipefail
+    newest=$(find "{{ backup_monitor_base_path }}/{{ item }}" -maxdepth 1 -type f \
+      -name '{{ backup_monitor_legacy_glob }}' -printf '%T@ %p\n' 2>/dev/null \
+      | sort -nr | head -1)
+    if [ -n "$newest" ]; then
+      ts=${newest%% *}
+      now=$(date +%s)
+      echo "$(( (now - ${ts%.*}) / 3600 )) $(basename "${newest#* }")"
+    fi
+  args:
+    executable: /bin/bash
+  loop: "{{ backup_monitor_active_hosts }}"
+  register: backup_monitor_legacy_archives
+  changed_when: false
+  failed_when: false
+
+- name: "Collect hosts with legacy archives"
+  ansible.builtin.set_fact:
+    backup_monitor_legacy_detected_hosts: >-
+      {{
+        backup_monitor_legacy_archives.results
+        | rejectattr('stdout', 'equalto', '')
+        | map(attribute='item')
+        | list
+      }}
+
+- name: "Build effective legacy host list"
+  ansible.builtin.set_fact:
+    backup_monitor_legacy_effective_hosts: >-
+      {{
+        ((backup_monitor_legacy_hosts | default([]) | list) + backup_monitor_legacy_detected_hosts)
+        | unique
+      }}
+
+- name: "Collect legacy hosts without archives"
+  ansible.builtin.set_fact:
+    backup_monitor_missing_legacy_hosts: >-
+      {{
+        backup_monitor_legacy_effective_hosts
+        | difference(backup_monitor_legacy_detected_hosts)
+      }}
+
+- name: "Initialize legacy stale hosts list"
+  ansible.builtin.set_fact:
+    backup_monitor_stale_legacy_hosts: []
+
+- name: "Check legacy backup staleness"
+  ansible.builtin.set_fact:
+    backup_monitor_stale_legacy_hosts: >-
+      {{
+        backup_monitor_stale_legacy_hosts
+        + [{
+          'host': item.item,
+          'last_backup': item.stdout.split()[1],
+          'age_hours': item.stdout.split()[0] | int
+        }]
+      }}
+  loop: "{{ backup_monitor_legacy_archives.results }}"
+  when:
+    - item.item in backup_monitor_legacy_effective_hosts
+    - item.stdout | trim | length > 0
+    - (item.stdout.split()[0] | int) > (backup_monitor_legacy_staleness_hours | int)
+
+- name: "Report legacy backup freshness"
+  ansible.builtin.debug:
+    msg: >-
+      {% if backup_monitor_legacy_effective_hosts | length == 0 %}
+      No legacy backup hosts detected.
+      {% else %}
+      {% if backup_monitor_stale_legacy_hosts | length > 0 %}
+      STALE LEGACY BACKUPS (>{{ backup_monitor_legacy_staleness_hours }}h):
+      {% for h in backup_monitor_stale_legacy_hosts %}
+        {{ h.host }}  last: {{ h.last_backup }}  ({{ h.age_hours }}h ago)
+      {% endfor %}
+      {% else %}
+      All legacy backup hosts have fresh archives.
+      {% endif %}
+      {% if backup_monitor_missing_legacy_hosts | length > 0 %}
+      MISSING LEGACY BACKUPS:
+      {% for h in backup_monitor_missing_legacy_hosts %}
+        {{ h }}
+      {% endfor %}
+      {% endif %}
+      {% endif %}
+
+- name: "Fail on stale legacy backups (strict mode)"
+  ansible.builtin.fail:
+    msg: >-
+      {{ backup_monitor_stale_legacy_hosts | length }} legacy host(s) have
+      stale backups and {{ backup_monitor_missing_legacy_hosts | length }}
+      host(s) have no backup archives at all. Check the Hestia backup cron on
+      those hosts.
+  when:
+    - backup_monitor_strict_staleness | bool
+    - (backup_monitor_stale_legacy_hosts | length > 0) or (backup_monitor_missing_legacy_hosts | length > 0)
