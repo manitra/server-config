@@ -53,6 +53,7 @@ GLOBAL_EXCLUDES=(
 
 REPO_KEYS=()
 SEEN_DB_KEYS=()
+DUMP_FAILURES=0
 declare -A REPO_NAMES=()
 declare -A REPO_LABELS=()
 declare -A REPO_URIS=()
@@ -461,21 +462,43 @@ run_postgres_dump() {
   fi
 }
 
+# MariaDB images ship only `mariadb-dump`, MySQL images only `mysqldump`.
+# Pick whichever binary the container actually provides.
+mysql_dump_client() {
+  local container="$1"
+  local candidate
+
+  for candidate in mariadb-dump mysqldump; do
+    if docker exec "${container}" sh -lc "command -v ${candidate}" > /dev/null 2>&1; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 run_mysql_dump() {
   local container="$1"
   local user="$2"
   local password_env="$3"
   local extra_args="$4"
   local output="$5"
+  local client
+
+  if ! client="$(mysql_dump_client "${container}")"; then
+    log "ERROR: no mysqldump/mariadb-dump binary found in ${container}"
+    return 1
+  fi
 
   mkdir -p "$(dirname "${output}")"
   if [ -n "${password_env}" ]; then
     docker exec "${container}" sh -lc \
-      "set -eu; exec mysqldump --single-transaction --quick --routines --events --all-databases -u\"${user}\" -p\"\${${password_env}}\" ${extra_args}" \
+      "set -eu; exec ${client} --single-transaction --quick --routines --events --all-databases -u\"${user}\" -p\"\${${password_env}}\" ${extra_args}" \
       | gzip > "${output}"
   else
     docker exec "${container}" sh -lc \
-      "set -eu; exec mysqldump --single-transaction --quick --routines --events --all-databases -u\"${user}\" ${extra_args}" \
+      "set -eu; exec ${client} --single-transaction --quick --routines --events --all-databases -u\"${user}\" ${extra_args}" \
       | gzip > "${output}"
   fi
 }
@@ -506,18 +529,30 @@ run_dump_entry() {
   repo_add_path "${repo_key}" "$(dirname "${output}")"
 
   log "Dumping ${dump_name} (type=${dump_type}, container=${container})"
+
+  # A failing dump must not abort the whole run: the repos that can be backed
+  # up still are, and the failure is reported at the end (non-zero exit).
+  local dump_status=0
   case "${dump_type}" in
     postgres)
-      run_postgres_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}"
+      run_postgres_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}" || dump_status=$?
       ;;
     mysql|mariadb)
-      run_mysql_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}"
+      run_mysql_dump "${container}" "${user}" "${password_env}" "${extra_args}" "${output}" || dump_status=$?
       ;;
     *)
       log "ERROR: Unsupported dump type '${dump_type}'. Aborting."
       exit 1
       ;;
   esac
+
+  if [ "${dump_status}" -ne 0 ]; then
+    log "ERROR: Dump '${dump_name}' failed (exit ${dump_status}); keeping going with the other dumps"
+    rm -f "${output}"
+    DUMP_FAILURES=$((DUMP_FAILURES + 1))
+    return 0
+  fi
+
   log "Dump written to ${output} ($(du -sh "${output}" | cut -f1))"
 }
 
@@ -759,5 +794,10 @@ done
 # -- Clean up local dumps -------------------------------------------------------
 rm -rf "${GENERATED_DUMP_ROOT}"
 log "Generated dumps removed - they are stored inside restic"
+
+if [ "${DUMP_FAILURES}" -gt 0 ]; then
+  log "ERROR: ${DUMP_FAILURES} database dump(s) failed - restic ran, but fix the dump errors above"
+  exit 1
+fi
 
 log "Backup complete"
