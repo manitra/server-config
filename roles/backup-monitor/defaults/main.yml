@@ -75,8 +75,9 @@ backup_monitor_strict_staleness: true
 backup_monitor_drill_enabled: true
 
 # Repos to verify per weekly run. The rotation covers every repo over time
-# without making a single run expensive.
-backup_monitor_drill_repos_per_run: 2
+# without making a single run expensive. Every repo is drilled at least monthly
+# (4 per week over the current 12 repos = a 3-week cycle).
+backup_monitor_drill_repos_per_run: 4
 
 # Only files up to this size are streamed into a validator (2 GiB).
 backup_monitor_drill_max_file_bytes: 2147483648
