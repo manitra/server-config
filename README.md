@@ -9,6 +9,31 @@ Install the required Ansible collections before running the playbooks:
 
 - `ansible-galaxy collection install -r collections/requirements.yml`
 
+## Package updates and Ubuntu phasing
+
+`roles/maintain` runs `apt` with `upgrade: dist` on every host, every night.
+
+Ubuntu stages part of its `-updates` pocket as **phased updates**: only a
+percentage of machines see each update as installable at a time, so
+`apt-get dist-upgrade` reports some packages as *deferred due to phasing* and
+leaves them at the old version. `apt list --upgradable` ignores phasing, so
+Coolify's weekly patch check lists those same packages as pending and emails
+about them even though the nightly run already did everything it was allowed to.
+
+This role opts the fleet out of phasing by default
+(`maintain_apt_include_phased_updates: true` in
+`roles/maintain/defaults/main.yml`), by writing
+`/etc/apt/apt.conf.d/99-phased-updates`:
+
+```
+APT::Get::Always-Include-Phased-Updates "true";
+```
+
+Set the variable to `false` to restore Ubuntu's staged rollout, so updates apply
+only once this host is reached by the phasing percentage.
+
+To re-apply only that setting: `ansible-playbook daily.yml --tags apt_phasing`.
+
 ## vps12 SMTP relay
 
 `vps12.manitra.net` is also in the `smtp_relay` group. Relay accounts are defined in `group_vars/smtp_relay.yml` under `relay_users`; each user has its own vaulted password, allowed sender regex, and allowed client IP list.

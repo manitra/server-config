@@ -1,4 +1,23 @@
 
+- name: Configure apt phased updates handling
+  become: true
+  tags: apt_phasing
+  block:
+    - name: Install phased-updates apt drop-in
+      copy:
+        dest: "{{ maintain_apt_phased_updates_conf }}"
+        mode: '0644'
+        content: |
+          // Managed by Ansible (roles/maintain). Do not edit by hand.
+          APT::Get::Always-Include-Phased-Updates "true";
+      when: maintain_apt_include_phased_updates | bool
+
+    - name: Remove phased-updates apt drop-in when disabled
+      file:
+        path: "{{ maintain_apt_phased_updates_conf }}"
+        state: absent
+      when: not maintain_apt_include_phased_updates | bool
+
 - name: Repair any interrupted dpkg state
   command: dpkg --configure -a
   changed_when: false

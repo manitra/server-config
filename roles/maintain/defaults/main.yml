@@ -1,0 +1,20 @@
+---
+# ── maintain role defaults ────────────────────────────────────────────────────
+
+# Ubuntu publishes some updates (SRUs, occasionally security fixes) as "phased
+# updates": only a percentage of machines see them as installable at any time, so
+# `apt-get dist-upgrade` defers them until the rollout reaches this host.
+#
+# `apt list --upgradable` ignores phasing, so Coolify's weekly patch check
+# reports those deferred packages as pending even though the nightly run already
+# did everything it was allowed to do. Setting this to true opts the fleet out of
+# phasing: every available update is installed on the next run.
+#
+# Trade-off: an update reaches you before it has been staged fleet-wide, so a
+# regression that phasing would have contained on other machines reaches you too.
+# Set to false to keep Ubuntu's phased rollout (updates then apply only once the
+# phasing percentage for this host is reached).
+maintain_apt_include_phased_updates: true
+
+# Drop-in that carries the setting above. 99-* sorts last, so it wins.
+maintain_apt_phased_updates_conf: /etc/apt/apt.conf.d/99-phased-updates
