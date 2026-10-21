@@ -32,7 +32,7 @@ CNAME:
   - record: coolify
     value: vps11.manitra.net
   - record: '*'
-    value: vps11.manitra.net
+    value: vps04.manitra.net
   - record: auth
     value: vps11.manitra.net
   - record: trading
