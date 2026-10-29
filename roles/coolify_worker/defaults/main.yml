@@ -12,9 +12,9 @@
 coolify_worker_ssh_user: root
 coolify_worker_ssh_port: 22
 
-# Path to the Coolify master's SSH public key. The master generates this key at
-# /data/coolify/ssh/keys/id.<user>@host.docker.internal during its own setup.
-coolify_worker_master_key_pub: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+# Coolify stores SSH keys in its database as private_keys.id. Key 0 is the
+# master's localhost key, which Coolify also uses to reach workers.
+coolify_worker_master_private_key_id: 0
 
 # ── Metadata shown in the Coolify UI ──────────────────────────────────────────
 coolify_worker_name: "{{ inventory_hostname.split('.')[0] }}"

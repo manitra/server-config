@@ -52,15 +52,23 @@
     mode: "0700"
 
 - name: Read Coolify master SSH public key
-  slurp:
-    src: "{{ coolify_worker_master_key_pub }}"
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - coolify
+      - php
+      - artisan
+      - tinker
+      - '--execute=echo App\Models\PrivateKey::find({{ coolify_worker_master_private_key_id }})->public_key;'
   delegate_to: "{{ groups['coolify'][0] }}"
   register: _cw_master_pubkey
+  changed_when: false
 
 - name: Authorize Coolify master SSH key
   authorized_key:
     user: "{{ coolify_worker_ssh_user }}"
-    key: "{{ _cw_master_pubkey.content | b64decode }}"
+    key: "{{ _cw_master_pubkey.stdout_lines[-1] | trim }}"
     comment: coolify-master
     state: present
   no_log: true

@@ -18,8 +18,11 @@
         state: absent
       when: not maintain_apt_include_phased_updates | bool
 
+# dpkg has no lock-wait option of its own, so let apt wait for the frontend
+# lock and drive `dpkg --configure`. --no-remove keeps a repair from ever
+# uninstalling packages to satisfy broken dependencies.
 - name: Repair any interrupted dpkg state
-  command: dpkg --configure -a
+  command: apt-get -o DPkg::Lock::Timeout=1800 --no-remove --fix-broken install -y
   changed_when: false
 
 - name: Find deprecated ondrej/php apt source files
